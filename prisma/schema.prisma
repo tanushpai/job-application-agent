@@ -1,0 +1,280 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts           Account[]
+  sessions           Session[]
+  profile            Profile?
+  resumes            Resume[]
+  connectorPrefs     UserConnectorPref[]
+  savedJobs          SavedJob[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Profile {
+  id          String   @id @default(cuid())
+  userId      String   @unique @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName    String?  @map("full_name")
+  email       String?
+  phone       String?
+  location    String?
+  headline    String?
+  summary     String?  @db.Text
+  website     String?
+  linkedin    String?
+  github      String?
+  twitter     String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  skills         Skill[]
+  experiences    Experience[]
+  educations     Education[]
+  projects       Project[]
+  certifications Certification[]
+
+  @@map("profiles")
+}
+
+model Resume {
+  id         String   @id @default(cuid())
+  userId     String   @map("user_id")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileName   String   @map("file_name")
+  fileUrl    String   @map("file_url")
+  fileSize   Int      @map("file_size")
+  fileType   String   @map("file_type")
+  parsedData Json?    @map("parsed_data")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("resumes")
+}
+
+model Experience {
+  id          String   @id @default(cuid())
+  profileId   String   @map("profile_id")
+  profile     Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  company     String
+  title       String
+  location    String?
+  startDate   String?  @map("start_date")
+  endDate     String?  @map("end_date")
+  isCurrent   Boolean  @default(false) @map("is_current")
+  description String?  @db.Text
+  highlights  String[] @default([])
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("experiences")
+}
+
+model Education {
+  id           String   @id @default(cuid())
+  profileId    String   @map("profile_id")
+  profile      Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  institution  String
+  degree       String?
+  fieldOfStudy String?  @map("field_of_study")
+  startDate    String?  @map("start_date")
+  endDate      String?  @map("end_date")
+  grade        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("educations")
+}
+
+model Skill {
+  id        String   @id @default(cuid())
+  profileId String   @map("profile_id")
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  name      String
+  category  String   @default("Technical")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("skills")
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  profileId   String   @map("profile_id")
+  profile     Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  title       String
+  description String?  @db.Text
+  techStack   String[] @default([]) @map("tech_stack")
+  link        String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("projects")
+}
+
+model Certification {
+  id        String   @id @default(cuid())
+  profileId String   @map("profile_id")
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  name      String
+  issuer    String?
+  issueDate String?  @map("issue_date")
+  url       String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("certifications")
+}
+
+// ─── Job Discovery System ────────────────────────────────────────────────────
+
+/// Registry of available job source connectors.
+model ConnectorSource {
+  id             String   @id @default(cuid())
+  slug           String   @unique          // e.g. "greenhouse"
+  name           String                    // e.g. "Greenhouse"
+  description    String   @db.Text
+  category       String                    // "job_board" | "ats" | "remote" | "other"
+  websiteUrl     String   @map("website_url")
+  logoUrl        String?  @map("logo_url")
+  status         String   @default("coming_soon") // "connected" | "requires_config" | "coming_soon" | "error"
+  jobCount       Int      @default(0) @map("job_count")
+  lastFetchedAt  DateTime? @map("last_fetched_at")
+  lastErrorAt    DateTime? @map("last_error_at")
+  lastError      String?  @db.Text @map("last_error")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  jobSources     JobSource[]
+  userPrefs      UserConnectorPref[]
+
+  @@map("connector_sources")
+}
+
+/// Normalized global job pool — one row per unique job, shared across all users.
+model Job {
+  id              String   @id @default(cuid())
+  externalId      String?  @map("external_id")   // source-specific ID
+  title           String
+  company         String
+  companyLogo     String?  @map("company_logo")
+  location        String?
+  locationType    String?  @map("location_type")  // "remote" | "onsite" | "hybrid"
+  jobType         String?  @map("job_type")        // "full_time" | "part_time" | "contract"
+  experienceLevel String?  @map("experience_level")
+  salaryMin       Int?     @map("salary_min")
+  salaryMax       Int?     @map("salary_max")
+  salaryCurrency  String?  @map("salary_currency")
+  description     String?  @db.Text
+  skills          String[] @default([])
+  jobUrl          String   @map("job_url")
+  applyUrl        String?  @map("apply_url")
+  postedAt        DateTime? @map("posted_at")
+  closedAt        DateTime? @map("closed_at")
+  isActive        Boolean  @default(true) @map("is_active")
+  firstSeenAt     DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt      DateTime @updatedAt @map("last_seen_at")
+
+  sources    JobSource[]
+  savedBy    SavedJob[]
+
+  @@index([company])
+  @@index([isActive])
+  @@map("jobs")
+}
+
+/// Many-to-many: which connector(s) a job was discovered on.
+model JobSource {
+  id          String   @id @default(cuid())
+  jobId       String   @map("job_id")
+  connectorId String   @map("connector_id")
+  sourceJobId String?  @map("source_job_id")   // ID in the external system
+  fetchedAt   DateTime @default(now()) @map("fetched_at")
+
+  job       Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  connector ConnectorSource @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, connectorId])
+  @@map("job_sources")
+}
+
+/// Per-user connector enable/disable preference.
+model UserConnectorPref {
+  id          String  @id @default(cuid())
+  userId      String  @map("user_id")
+  connectorId String  @map("connector_id")
+  enabled     Boolean @default(true)
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  connector ConnectorSource @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, connectorId])
+  @@map("user_connector_prefs")
+}
+
+/// Per-user saved jobs.
+model SavedJob {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  jobId     String   @map("job_id")
+  savedAt   DateTime @default(now()) @map("saved_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job  Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobId])
+  @@map("saved_jobs")
+}
