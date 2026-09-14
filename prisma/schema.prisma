@@ -23,6 +23,8 @@ model User {
   resumes            Resume[]
   connectorPrefs     UserConnectorPref[]
   savedJobs          SavedJob[]
+  applications       Application[]
+  browserSessions    BrowserSession[]
 
   @@map("users")
 }
@@ -103,6 +105,8 @@ model Resume {
   parsedData Json?    @map("parsed_data")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
+
+  applications Application[]
 
   @@map("resumes")
 }
@@ -228,8 +232,9 @@ model Job {
   firstSeenAt     DateTime @default(now()) @map("first_seen_at")
   lastSeenAt      DateTime @updatedAt @map("last_seen_at")
 
-  sources    JobSource[]
-  savedBy    SavedJob[]
+  sources      JobSource[]
+  savedBy      SavedJob[]
+  applications Application[]
 
   @@index([company])
   @@index([isActive])
@@ -278,3 +283,124 @@ model SavedJob {
   @@unique([userId, jobId])
   @@map("saved_jobs")
 }
+
+// ─── Automated Job Application System ────────────────────────────────────────
+
+enum ApplicationStatus {
+  QUEUED
+  DETECTING_PLATFORM
+  OPENING_BROWSER
+  DETECTING_FORM
+  MAPPING_PROFILE
+  MISSING_PROFILE_INFO
+  READY_TO_APPLY
+  FILLING_FORM
+  UPLOADING_RESUME
+  VALIDATING
+  SUBMITTING
+  VERIFYING_SUBMISSION
+  APPLIED
+  REQUIRES_USER_ACTION
+  FAILED
+  CANCELLED
+}
+
+enum ApplicationMode {
+  MANUAL
+  AUTOMATIC
+}
+
+/// Represents a job application attempt by a user.
+model Application {
+  id              String            @id @default(cuid())
+  userId          String            @map("user_id")
+  jobId           String            @map("job_id")
+  resumeId        String?           @map("resume_id")
+  mode            ApplicationMode   @default(AUTOMATIC)
+  status          ApplicationStatus @default(QUEUED)
+  platform        String            @default("unknown") // "greenhouse" | "lever" | "workable" | "ashby" | "smartrecruiters" | "workday" | "recruitee" | "personio" | "bamboohr" | "unknown"
+  
+  // Progress & diagnostic metadata
+  missingFields   Json?             @map("missing_fields")   // Array of { field: string, label: string, reason: string }
+  customQuestions Json?             @map("custom_questions") // Array of { question: string, answer: string, confidence: number }
+  appliedUrl      String?           @map("applied_url")
+  submittedAt     DateTime?         @map("submitted_at")
+  failureReason   String?           @db.Text @map("failure_reason")
+  retryCount      Int               @default(0) @map("retry_count")
+  maxRetries      Int               @default(3) @map("max_retries")
+  
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job             Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  resume          Resume?           @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+  
+  fields          ApplicationField[]
+  events          ApplicationEvent[]
+  browserSessions BrowserSession[]
+
+  @@index([userId, status])
+  @@index([jobId])
+  @@map("applications")
+}
+
+/// Detected and mapped form fields for an application run.
+model ApplicationField {
+  id                 String      @id @default(cuid())
+  applicationId      String      @map("application_id")
+  label              String
+  fieldType          String      @map("field_type") // text, email, phone, textarea, select, radio, checkbox, file
+  isRequired         Boolean     @default(false) @map("is_required")
+  placeholder        String?
+  options            Json?       // array of options for select/radio
+  detectedMeaning    String?     @map("detected_meaning") // e.g. "first_name", "linkedin", "work_auth"
+  selector           String?     // CSS/XPath/Playwright selector
+  mappedProfileField String?     @map("mapped_profile_field")
+  confidence         Float       @default(1.0)
+  currentValue       String?     @db.Text @map("current_value")
+  status             String      @default("pending") // "matched" | "missing" | "filled" | "skipped"
+
+  application        Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@map("application_fields")
+}
+
+/// Real-time application execution and progress events.
+model ApplicationEvent {
+  id            String      @id @default(cuid())
+  applicationId String      @map("application_id")
+  eventType     String      @map("event_type") // APPLICATION_CREATED, PLATFORM_DETECTED, etc.
+  stage         String?     // e.g. "Platform Detection", "Form Filling"
+  message       String      @db.Text
+  metadata      Json?
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, createdAt])
+  @@map("application_events")
+}
+
+/// Browser execution and debugging session record.
+model BrowserSession {
+  id              String      @id @default(cuid())
+  applicationId   String      @map("application_id")
+  userId          String      @map("user_id")
+  browserType     String      @default("chromium") @map("browser_type")
+  externalSessionId String?   @map("external_session_id") // Future-proofing for optional external providers
+  startedAt       DateTime    @default(now()) @map("started_at")
+  completedAt     DateTime?   @map("completed_at")
+  status          String      @default("active") // "active" | "completed" | "failed" | "terminated"
+  error           String?     @db.Text
+  screenshotPaths Json?       @map("screenshot_paths") // string array of local relative paths
+
+  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@index([userId])
+  @@map("browser_sessions")
+}
+

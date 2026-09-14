@@ -14,6 +14,7 @@ import {
   Calendar 
 } from "lucide-react";
 import { toggleSaveJob } from "@/lib/actions/jobs-actions";
+import { ApplyModal } from "@/components/dashboard/jobs/apply-modal";
 
 export interface JobCardProps {
   id: string;
@@ -42,6 +43,7 @@ export interface JobCardProps {
 export function JobCard({ job }: { job: JobCardProps }) {
   const [saved, setSaved] = useState(job.isSaved);
   const [saving, setSaving] = useState(false);
+  const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
 
   const handleToggleSave = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -167,13 +169,26 @@ export function JobCard({ job }: { job: JobCardProps }) {
               <Bookmark className={`h-4 w-4 ${saved ? "fill-primary" : ""}`} />
             </Button>
 
-            {/* Apply Now button */}
-            <a href={job.applyUrl} target="_blank" rel="noopener noreferrer">
-              <Button size="sm" className="h-8 px-3 text-xs gap-1.5 font-medium shadow-sm">
-                Apply Now
-                <ExternalLink className="h-3 w-3" />
-              </Button>
-            </a>
+            {/* Apply Now button with Modal */}
+            <Button
+              size="sm"
+              onClick={() => setIsApplyModalOpen(true)}
+              className="h-8 px-3 text-xs gap-1.5 font-medium shadow-sm bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              <Sparkles className="h-3 w-3" />
+              Apply Now
+            </Button>
+
+            <ApplyModal
+              isOpen={isApplyModalOpen}
+              onClose={() => setIsApplyModalOpen(false)}
+              job={{
+                id: job.id,
+                title: job.title,
+                company: job.company,
+                applyUrl: job.applyUrl || job.jobUrl,
+              }}
+            />
           </div>
         </div>
       </CardContent>
