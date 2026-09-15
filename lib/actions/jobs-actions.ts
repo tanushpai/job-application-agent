@@ -33,7 +33,12 @@ export interface DiscoveredJob {
 
 export interface GetJobsOptions {
   search?: string;
+  location?: string; // free-text city/country e.g. "Bangalore", "India", "New York"
   locationType?: string; // "all" | "remote" | "onsite" | "hybrid"
+  jobType?: string; // "all" | "full_time" | "part_time" | "contract" | "internship"
+  experienceLevel?: string; // "all" | "entry" | "mid" | "senior" | "lead" | "executive"
+  minMatchScore?: number; // 0 | 60 | 80
+  sortBy?: string; // "match" | "recent" | "company"
   connectorSlug?: string; // filter by specific connector
   savedOnly?: boolean;
   page?: number;
@@ -216,6 +221,19 @@ export async function getJobsForUser(options: GetJobsOptions = {}): Promise<Disc
     where.locationType = options.locationType;
   }
 
+  // Free-text location filter (city / country / state)
+  if (options.location && options.location.trim()) {
+    where.location = { contains: options.location.trim(), mode: "insensitive" };
+  }
+
+  if (options.jobType && options.jobType !== "all") {
+    where.jobType = options.jobType;
+  }
+
+  if (options.experienceLevel && options.experienceLevel !== "all") {
+    where.experienceLevel = options.experienceLevel;
+  }
+
   if (options.search) {
     where.OR = [
       { title: { contains: options.search, mode: "insensitive" } },
@@ -232,6 +250,14 @@ export async function getJobsForUser(options: GetJobsOptions = {}): Promise<Disc
     };
   }
 
+  // Determine Prisma orderBy clause
+  let orderBy: any = { postedAt: "desc" };
+  if (options.sortBy === "company") {
+    orderBy = { company: "asc" };
+  } else if (options.sortBy === "recent") {
+    orderBy = { postedAt: "desc" };
+  }
+
   // 4. Fetch jobs
   const jobs = await prisma.job.findMany({
     where,
@@ -245,9 +271,7 @@ export async function getJobsForUser(options: GetJobsOptions = {}): Promise<Disc
         where: { userId: user.id },
       },
     },
-    orderBy: {
-      postedAt: "desc",
-    },
+    orderBy,
     take: options.limit || 50,
   });
 
@@ -261,7 +285,7 @@ export async function getJobsForUser(options: GetJobsOptions = {}): Promise<Disc
       }
     : null;
 
-  const formattedJobs = jobs.map((job) => {
+  let formattedJobs = jobs.map((job) => {
     const isSaved = job.savedBy.length > 0;
     const matchScore = calculateMatchScore(
       {
@@ -301,9 +325,22 @@ export async function getJobsForUser(options: GetJobsOptions = {}): Promise<Disc
     };
   });
 
-  // Sort by match score descending if no specific search query
-  if (!options.search) {
+  // Filter by minMatchScore if specified
+  if (options.minMatchScore && options.minMatchScore > 0) {
+    formattedJobs = formattedJobs.filter(j => j.matchScore >= (options.minMatchScore || 0));
+  }
+
+  // Sort results
+  if (options.sortBy === "match" || (!options.sortBy && !options.search)) {
     formattedJobs.sort((a, b) => b.matchScore - a.matchScore);
+  } else if (options.sortBy === "recent") {
+    formattedJobs.sort((a, b) => {
+      const timeA = a.postedAt ? new Date(a.postedAt).getTime() : 0;
+      const timeB = b.postedAt ? new Date(b.postedAt).getTime() : 0;
+      return timeB - timeA;
+    });
+  } else if (options.sortBy === "company") {
+    formattedJobs.sort((a, b) => a.company.localeCompare(b.company));
   }
 
   return formattedJobs;

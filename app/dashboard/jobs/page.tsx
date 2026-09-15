@@ -13,7 +13,12 @@ export const metadata = {
 interface PageProps {
   searchParams: Promise<{
     search?: string;
+    location?: string;
     locationType?: string;
+    jobType?: string;
+    experienceLevel?: string;
+    minMatchScore?: string;
+    sortBy?: string;
     savedOnly?: string;
     connectorSlug?: string;
   }>;
@@ -24,7 +29,12 @@ export default async function JobsPage({ searchParams }: PageProps) {
 
   const jobs = await getJobsForUser({
     search: params.search,
+    location: params.location,
     locationType: params.locationType,
+    jobType: params.jobType,
+    experienceLevel: params.experienceLevel,
+    minMatchScore: params.minMatchScore ? parseInt(params.minMatchScore, 10) : undefined,
+    sortBy: params.sortBy,
     savedOnly: params.savedOnly === "true",
     connectorSlug: params.connectorSlug,
   });
@@ -55,8 +65,15 @@ export default async function JobsPage({ searchParams }: PageProps) {
       {/* Filters and Search Bar */}
       <JobFilters
         initialSearch={params.search}
+        initialLocation={params.location}
         initialLocationType={params.locationType}
+        initialJobType={params.jobType}
+        initialExperienceLevel={params.experienceLevel}
+        initialMinMatchScore={params.minMatchScore}
+        initialSortBy={params.sortBy}
+        initialConnectorSlug={params.connectorSlug}
         initialSavedOnly={params.savedOnly === "true"}
+        totalJobsCount={jobs.length}
       />
 
       {/* Jobs Grid / Empty State */}
