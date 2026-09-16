@@ -375,6 +375,7 @@ export async function toggleSaveJob(jobId: string) {
       },
     });
     revalidatePath("/dashboard/jobs");
+    revalidatePath("/dashboard/saved-jobs");
     return { isSaved: false };
   } else {
     await prisma.savedJob.create({
@@ -384,6 +385,300 @@ export async function toggleSaveJob(jobId: string) {
       },
     });
     revalidatePath("/dashboard/jobs");
+    revalidatePath("/dashboard/saved-jobs");
     return { isSaved: true };
+  }
+}
+
+/**
+ * Returns all jobs saved by the current user, each with the latest
+ * application status so the UI can display the correct applied state.
+ */
+export async function getSavedJobsForUser(): Promise<(DiscoveredJob & { applicationStatus?: string | null })[]> {
+  try {
+    const user = await requireAuth();
+
+    const profile = await prisma.profile.findUnique({
+      where: { userId: user.id },
+      include: { skills: true },
+    });
+
+    const savedRows = await prisma.savedJob.findMany({
+      where: { userId: user.id },
+      orderBy: { savedAt: "desc" },
+      include: {
+        job: {
+          include: {
+            sources: { include: { connector: true } },
+            savedBy: { where: { userId: user.id } },
+            applications: {
+              where: { userId: user.id },
+              orderBy: { createdAt: "desc" },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+
+    const userProfileCriteria = profile
+      ? {
+          skills: profile.skills.map((s) => s.name),
+          headline: profile.headline || undefined,
+          summary: profile.summary || undefined,
+          location: profile.location || undefined,
+        }
+      : null;
+
+    return savedRows.map(({ job }) => {
+      const matchScore = calculateMatchScore(
+        {
+          title: job.title,
+          skills: job.skills,
+          description: job.description,
+          location: job.location,
+          locationType: job.locationType,
+        },
+        userProfileCriteria
+      );
+
+      const connectors = job.sources.map((s) => ({
+        id: s.connector.id,
+        slug: s.connector.slug,
+        name: s.connector.name,
+        status: s.connector.status,
+      }));
+
+      const latestApplication = job.applications[0] ?? null;
+
+      return {
+        id: job.id,
+        externalId: job.externalId,
+        title: job.title,
+        company: job.company,
+        companyLogo: job.companyLogo,
+        location: job.location || "Remote / Various",
+        locationType: job.locationType || "remote",
+        jobType: job.jobType || "full_time",
+        experienceLevel: job.experienceLevel || "mid",
+        skills: job.skills,
+        jobUrl: job.jobUrl,
+        applyUrl: job.applyUrl || job.jobUrl,
+        postedAt: job.postedAt,
+        isSaved: true,
+        matchScore,
+        connectors,
+        applicationStatus: latestApplication?.status ?? null,
+      };
+    });
+  } catch (error) {
+    console.error("Error in getSavedJobsForUser:", error);
+    return [];
+  }
+}
+
+/**
+ * Aggregates all statistics and recent data needed for the main dashboard overview page.
+ */
+export async function getDashboardStats() {
+  try {
+    const user = await requireAuth();
+
+    // 1. Fetch user profile + counts
+    const [profile, resumeCount, savedCount, applications, totalJobsCount, connectorSources, rawJobs] =
+      await Promise.all([
+        prisma.profile.findUnique({
+          where: { userId: user.id },
+          include: {
+            skills: true,
+            experiences: true,
+            educations: true,
+          },
+        }),
+        prisma.resume.count({ where: { userId: user.id } }),
+        prisma.savedJob.count({ where: { userId: user.id } }),
+        prisma.application.findMany({
+          where: { userId: user.id },
+          include: {
+            job: true,
+          },
+          orderBy: { updatedAt: "desc" },
+        }),
+        prisma.job.count({ where: { isActive: true } }),
+        prisma.connectorSource.findMany({
+          orderBy: { jobCount: "desc" },
+        }),
+        prisma.job.findMany({
+          where: { isActive: true },
+          include: {
+            sources: {
+              include: {
+                connector: true,
+              },
+            },
+            savedBy: {
+              where: { userId: user.id },
+              select: { id: true },
+            },
+            applications: {
+              where: { userId: user.id },
+              select: { status: true },
+              orderBy: { createdAt: "desc" },
+              take: 1,
+            },
+          },
+          take: 20,
+          orderBy: { postedAt: "desc" },
+        }),
+      ]);
+
+    // Calculate profile completeness score (0-100)
+    let completeness = 0;
+    if (profile?.fullName) completeness += 15;
+    if (profile?.headline || profile?.summary) completeness += 20;
+    if ((profile?.skills?.length ?? 0) >= 3) completeness += 25;
+    else if ((profile?.skills?.length ?? 0) > 0) completeness += 10;
+    if ((profile?.experiences?.length ?? 0) > 0) completeness += 20;
+    if (resumeCount > 0) completeness += 20;
+
+    // Categorize applications
+    const inProgressStatuses = [
+      "QUEUED",
+      "DETECTING_PLATFORM",
+      "OPENING_BROWSER",
+      "DETECTING_FORM",
+      "MAPPING_PROFILE",
+      "READY_TO_APPLY",
+      "FILLING_FORM",
+      "UPLOADING_RESUME",
+      "VALIDATING",
+      "SUBMITTING",
+      "VERIFYING_SUBMISSION",
+    ];
+    const actionRequiredStatuses = ["REQUIRES_USER_ACTION", "MISSING_PROFILE_INFO"];
+
+    const appliedCount = applications.filter((a) => a.status === "APPLIED").length;
+    const inProgressCount = applications.filter((a) =>
+      inProgressStatuses.includes(a.status)
+    ).length;
+    const actionRequiredCount = applications.filter((a) =>
+      actionRequiredStatuses.includes(a.status)
+    ).length;
+    const failedCount = applications.filter(
+      (a) => a.status === "FAILED" || a.status === "CANCELLED"
+    ).length;
+
+    // Map recent applications
+    const recentApplications = applications.slice(0, 5).map((app) => ({
+      id: app.id,
+      jobId: app.jobId,
+      jobTitle: app.job.title,
+      company: app.job.company,
+      companyLogo: app.job.companyLogo,
+      location: app.job.location,
+      status: app.status,
+      mode: app.mode,
+      createdAt: app.createdAt,
+      updatedAt: app.updatedAt,
+      jobUrl: app.job.jobUrl,
+      applyUrl: app.job.applyUrl || app.job.jobUrl,
+    }));
+
+    // Fetch top recommended jobs
+    const userProfileCriteria = profile
+      ? {
+          skills: profile.skills.map((s) => s.name),
+          headline: profile.headline || undefined,
+          summary: profile.summary || undefined,
+          location: profile.location || undefined,
+        }
+      : null;
+
+    const scoredJobs = rawJobs.map((job) => {
+      const matchScore = calculateMatchScore(
+        {
+          title: job.title,
+          skills: job.skills,
+          description: job.description,
+          location: job.location,
+          locationType: job.locationType,
+        },
+        userProfileCriteria
+      );
+      return {
+        id: job.id,
+        externalId: job.externalId,
+        title: job.title,
+        company: job.company,
+        companyLogo: job.companyLogo,
+        location: job.location || "Remote / Various",
+        locationType: job.locationType || "remote",
+        jobType: job.jobType || "full_time",
+        experienceLevel: job.experienceLevel || "mid",
+        skills: job.skills,
+        jobUrl: job.jobUrl,
+        applyUrl: job.applyUrl || job.jobUrl,
+        postedAt: job.postedAt,
+        isSaved: job.savedBy.length > 0,
+        matchScore,
+        connectors: job.sources.map((s) => ({
+          id: s.connector.id,
+          slug: s.connector.slug,
+          name: s.connector.name,
+          status: s.connector.status,
+        })),
+        applicationStatus: job.applications[0]?.status ?? null,
+      };
+    });
+
+    // Sort by match score descending and take top 4
+    scoredJobs.sort((a, b) => b.matchScore - a.matchScore);
+    const topRecommendedJobs = scoredJobs.slice(0, 4);
+
+    const avgScore =
+      topRecommendedJobs.length > 0
+        ? Math.round(
+            topRecommendedJobs.reduce((acc, curr) => acc + curr.matchScore, 0) /
+              topRecommendedJobs.length
+          )
+        : 85;
+
+    return {
+      user: {
+        name: user.name || "Job Seeker",
+        email: user.email || "",
+      },
+      metrics: {
+        totalDiscoveredJobs: totalJobsCount,
+        totalApplications: applications.length,
+        appliedCount,
+        inProgressCount,
+        actionRequiredCount,
+        failedCount,
+        savedJobsCount: savedCount,
+        averageMatchScore: avgScore,
+        activeConnectorsCount: connectorSources.filter((c) => c.status === "connected").length,
+      },
+      profileHealth: {
+        completionScore: completeness,
+        hasResume: resumeCount > 0,
+        hasExperiences: (profile?.experiences?.length ?? 0) > 0,
+        hasSkills: (profile?.skills?.length ?? 0) > 0,
+        skillsCount: profile?.skills?.length ?? 0,
+        experiencesCount: profile?.experiences?.length ?? 0,
+      },
+      recentApplications,
+      recommendedJobs: topRecommendedJobs,
+      connectorsSummary: connectorSources.map((c) => ({
+        id: c.id,
+        name: c.name,
+        slug: c.slug,
+        status: c.status,
+        jobCount: c.jobCount,
+      })),
+    };
+  } catch (error) {
+    console.error("Error in getDashboardStats:", error);
+    return null;
   }
 }

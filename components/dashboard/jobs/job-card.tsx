@@ -11,7 +11,11 @@ import {
   ExternalLink, 
   Sparkles, 
   Cable, 
-  Calendar 
+  Calendar,
+  CheckCircle2,
+  Clock,
+  XCircle,
+  AlertTriangle,
 } from "lucide-react";
 import { toggleSaveJob } from "@/lib/actions/jobs-actions";
 import { ApplyModal } from "@/components/dashboard/jobs/apply-modal";
@@ -32,6 +36,7 @@ export interface JobCardProps {
   postedAt: Date | null;
   isSaved: boolean;
   matchScore: number;
+  applicationStatus?: string | null;
   connectors: Array<{
     id: string;
     slug: string;
@@ -66,6 +71,32 @@ export function JobCard({ job }: { job: JobCardProps }) {
     if (score >= 60) return "bg-amber-500/10 text-amber-500 border-amber-500/20";
     return "bg-blue-500/10 text-blue-500 border-blue-500/20";
   };
+
+  // Application status display helpers
+  const getStatusBadge = (status: string | null | undefined) => {
+    if (!status) return null;
+    const s = status.toUpperCase();
+    if (s === "APPLIED") {
+      return { label: "Applied", className: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20", Icon: CheckCircle2 };
+    }
+    if (["QUEUED", "DETECTING_PLATFORM", "OPENING_BROWSER", "DETECTING_FORM",
+         "MAPPING_PROFILE", "READY_TO_APPLY", "FILLING_FORM",
+         "UPLOADING_RESUME", "VALIDATING", "SUBMITTING", "VERIFYING_SUBMISSION"].includes(s)) {
+      return { label: "In Progress", className: "bg-blue-500/10 text-blue-500 border-blue-500/20", Icon: Clock };
+    }
+    if (s === "REQUIRES_USER_ACTION" || s === "MISSING_PROFILE_INFO") {
+      return { label: "Action Needed", className: "bg-amber-500/10 text-amber-500 border-amber-500/20", Icon: AlertTriangle };
+    }
+    if (s === "FAILED") {
+      return { label: "Failed", className: "bg-red-500/10 text-red-500 border-red-500/20", Icon: XCircle };
+    }
+    if (s === "CANCELLED") {
+      return { label: "Cancelled", className: "bg-muted text-muted-foreground border-border/60", Icon: XCircle };
+    }
+    return null;
+  };
+
+  const statusBadge = getStatusBadge(job.applicationStatus);
 
   const formattedDate = job.postedAt
     ? new Date(job.postedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })
@@ -144,15 +175,27 @@ export function JobCard({ job }: { job: JobCardProps }) {
 
         {/* Footer: Discovered By & Action Buttons */}
         <div className="pt-4 border-t border-border/40 flex items-center justify-between text-xs mt-auto">
-          <div className="flex items-center gap-3 text-muted-foreground">
-            <div className="flex items-center gap-1">
-              <Cable className="h-3 w-3 text-primary" />
-              <span>{job.connectors[0]?.name || "ATS"}</span>
+          <div className="flex flex-col items-start gap-1.5 text-muted-foreground">
+            {/* Application status pill */}
+            {statusBadge && (
+              <Badge
+                variant="outline"
+                className={`gap-1 text-[10px] font-semibold px-2 py-0.5 h-auto ${statusBadge.className}`}
+              >
+                <statusBadge.Icon className="h-3 w-3" />
+                {statusBadge.label}
+              </Badge>
+            )}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1">
+                <Cable className="h-3 w-3 text-primary" />
+                <span>{job.connectors[0]?.name || "ATS"}</span>
+              </div>
+              <span className="flex items-center gap-1 text-[11px] opacity-75">
+                <Calendar className="h-3 w-3" />
+                {formattedDate}
+              </span>
             </div>
-            <span className="flex items-center gap-1 text-[11px] opacity-75">
-              <Calendar className="h-3 w-3" />
-              {formattedDate}
-            </span>
           </div>
 
           <div className="flex items-center gap-2">

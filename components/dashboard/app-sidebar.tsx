@@ -16,6 +16,8 @@ import {
   ChevronsUpDown,
   Zap,
   Cable,
+  Bookmark,
+  LayoutDashboard,
 } from "lucide-react";
 
 import {
@@ -60,10 +62,20 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
 
   const navigationItems = [
     {
+      title: "Dashboard",
+      url: "/dashboard",
+      icon: LayoutDashboard,
+    },
+    {
       title: "Jobs",
       url: "/dashboard/jobs",
       icon: Briefcase,
       badge: "Live",
+    },
+    {
+      title: "Saved Jobs",
+      url: "/dashboard/saved-jobs",
+      icon: Bookmark,
     },
     {
       title: "Connectors",
@@ -134,9 +146,7 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
           <SidebarGroupContent>
             <SidebarMenu>
               {navigationItems.map((item) => {
-                const isActive =
-                  pathname === item.url ||
-                  (item.url === "/dashboard/jobs" && pathname === "/dashboard");
+                const isActive = pathname === item.url;
 
                 return (
                   <SidebarMenuItem key={item.title}>
