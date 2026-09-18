@@ -22,6 +22,7 @@ model User {
   profile            Profile?
   resumes            Resume[]
   connectorPrefs     UserConnectorPref[]
+  customConnectors   CustomCompanyConnector[]
   savedJobs          SavedJob[]
   applications       Application[]
   browserSessions    BrowserSession[]
@@ -403,4 +404,26 @@ model BrowserSession {
   @@index([userId])
   @@map("browser_sessions")
 }
+
+/// Custom company careers page connector created by a user.
+model CustomCompanyConnector {
+  id           String    @id @default(cuid())
+  userId       String    @map("user_id")
+  companyName  String    @map("company_name")
+  careersUrl   String    @map("careers_url")
+  logoUrl      String?   @map("logo_url")
+  targetRoles  String[]  @default([]) @map("target_roles")
+  status       String    @default("active") // "active" | "syncing" | "error"
+  lastSyncedAt DateTime? @map("last_synced_at")
+  jobCount     Int       @default(0) @map("job_count")
+  lastError    String?   @db.Text @map("last_error")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("custom_company_connectors")
+}
+
 

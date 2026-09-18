@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { getDashboardStats } from "@/lib/actions/jobs-actions";
 import { JobCard } from "@/components/dashboard/jobs/job-card";
+import { CompanyLogo } from "@/components/dashboard/jobs/company-logo";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -219,26 +220,33 @@ export default async function DashboardOverviewPage() {
                         key={app.id}
                         className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 gap-3 hover:bg-muted/30 transition-colors"
                       >
-                        <div className="min-w-0 space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-sm truncate">{app.jobTitle}</span>
-                            <Badge
-                              variant="outline"
-                              className={`text-[10px] px-1.5 py-0 capitalize ${
-                                app.mode === "AUTOMATIC"
-                                  ? "border-purple-500/30 text-purple-600 bg-purple-500/5"
-                                  : "border-gray-500/30 text-muted-foreground"
-                              }`}
-                            >
-                              {app.mode === "AUTOMATIC" ? "🤖 AI Agent" : "Manual"}
-                            </Badge>
-                          </div>
-                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                            <span className="inline-flex items-center gap-1">
-                              <Building2 className="h-3 w-3" />
-                              {app.company}
-                            </span>
-                            {app.location && <span>• {app.location}</span>}
+                        <div className="flex items-center gap-3 min-w-0">
+                          <CompanyLogo
+                            company={app.company}
+                            logoUrl={app.companyLogo}
+                            jobUrl={app.jobUrl}
+                            size="sm"
+                          />
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-sm truncate">{app.jobTitle}</span>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] px-1.5 py-0 capitalize ${
+                                  app.mode === "AUTOMATIC"
+                                    ? "border-purple-500/30 text-purple-600 bg-purple-500/5"
+                                    : "border-gray-500/30 text-muted-foreground"
+                                }`}
+                              >
+                                {app.mode === "AUTOMATIC" ? "🤖 AI Agent" : "Manual"}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                              <span className="inline-flex items-center gap-1 font-medium">
+                                {app.company}
+                              </span>
+                              {app.location && <span>• {app.location}</span>}
+                            </div>
                           </div>
                         </div>
 

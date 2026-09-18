@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { toggleSaveJob } from "@/lib/actions/jobs-actions";
 import { ApplyModal } from "@/components/dashboard/jobs/apply-modal";
+import { CompanyLogo } from "@/components/dashboard/jobs/company-logo";
 
 export interface JobCardProps {
   id: string;
@@ -109,9 +110,12 @@ export function JobCard({ job }: { job: JobCardProps }) {
           {/* Top Row: Company Info & Match Score */}
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted/60 border border-border/60 font-bold text-foreground text-sm shadow-sm group-hover:border-primary/30 transition-colors">
-                {job.company.slice(0, 2).toUpperCase()}
-              </div>
+              <CompanyLogo
+                company={job.company}
+                logoUrl={job.companyLogo}
+                jobUrl={job.jobUrl}
+                size="md"
+              />
               <div>
                 <h4 className="text-sm font-semibold text-foreground tracking-tight flex items-center gap-1.5">
                   <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
