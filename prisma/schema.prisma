@@ -96,16 +96,29 @@ model Profile {
 }
 
 model Resume {
-  id         String   @id @default(cuid())
-  userId     String   @map("user_id")
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  fileName   String   @map("file_name")
-  fileUrl    String   @map("file_url")
-  fileSize   Int      @map("file_size")
-  fileType   String   @map("file_type")
-  parsedData Json?    @map("parsed_data")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  id              String        @id @default(cuid())
+  userId          String        @map("user_id")
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileName        String        @map("file_name")
+  fileUrl         String        @map("file_url")
+  fileSize        Int           @map("file_size")
+  fileType        String        @map("file_type")
+  parsedData      Json?         @map("parsed_data")
+  
+  // Tailored resume metadata
+  title           String?
+  isTailored      Boolean       @default(false) @map("is_tailored")
+  targetRole      String?       @map("target_role")
+  targetCompany   String?       @map("target_company")
+  tailoringPreset String?       @map("tailoring_preset") // ats_optimized, metric_heavy, technical_depth, executive
+  atsScore        Int?          @map("ats_score")
+  matchedSkills   String[]      @default([]) @map("matched_skills")
+  missingSkills   String[]      @default([]) @map("missing_skills")
+  jobDescription  String?       @db.Text @map("job_description")
+  isDefault       Boolean       @default(false) @map("is_default")
+
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
 
   applications Application[]
 
@@ -162,9 +175,13 @@ model Project {
   profileId   String   @map("profile_id")
   profile     Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
   title       String
+  role        String?  // e.g. "Lead Developer", "Full Stack Engineer"
   description String?  @db.Text
+  highlights  String[] @default([]) // Key quantifiable metrics & bullet achievements
   techStack   String[] @default([]) @map("tech_stack")
-  link        String?
+  link        String?  // Live demo URL
+  githubUrl   String?  @map("github_url")
+  challenges  String?  @db.Text // Architecture decisions, challenges, key learnings
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 

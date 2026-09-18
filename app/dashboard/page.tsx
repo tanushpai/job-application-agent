@@ -309,7 +309,7 @@ export default async function DashboardOverviewPage() {
                       <CheckCircle2 className="h-3.5 w-3.5" /> Uploaded
                     </span>
                   ) : (
-                    <Link href="/dashboard/resumes" className="text-amber-600 hover:underline font-medium">
+                    <Link href="/dashboard/resume" className="text-amber-600 hover:underline font-medium">
                       + Upload resume
                     </Link>
                   )}

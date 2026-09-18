@@ -23,10 +23,12 @@ import {
   Phone,
   Link2,
   GitBranch,
+  Sparkles,
 } from "lucide-react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { updateUserProfile } from "@/lib/actions/profile-actions";
+import { enhanceProjectNotesAction } from "@/lib/actions/tailored-resume-actions";
 
 interface ProfileTabsFormProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -37,6 +39,7 @@ export function ProfileTabsForm({ initialProfile }: ProfileTabsFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [enhancingProjectIndex, setEnhancingProjectIndex] = useState<number | null>(null);
 
   // Form states
   const [general, setGeneral] = useState({
@@ -118,21 +121,36 @@ export function ProfileTabsForm({ initialProfile }: ProfileTabsFormProps) {
   );
 
   const [projects, setProjects] = useState<Array<{
+    id?: string;
     title: string;
+    role: string;
     description: string;
+    highlights: string[];
     techStack: string[];
     link: string;
+    githubUrl: string;
+    challenges: string;
   }>>(
     initialProfile?.projects?.map((p: {
+      id?: string;
       title: string;
+      role?: string;
       description?: string;
+      highlights?: string[];
       techStack?: string[];
       link?: string;
+      githubUrl?: string;
+      challenges?: string;
     }) => ({
+      id: p.id,
       title: p.title || "",
+      role: p.role || "",
       description: p.description || "",
+      highlights: p.highlights || [],
       techStack: p.techStack || [],
       link: p.link || "",
+      githubUrl: p.githubUrl || "",
+      challenges: p.challenges || "",
     })) || []
   );
 
@@ -238,9 +256,13 @@ export function ProfileTabsForm({ initialProfile }: ProfileTabsFormProps) {
       ...prev,
       {
         title: "",
+        role: "",
         description: "",
+        highlights: [""],
         techStack: [],
         link: "",
+        githubUrl: "",
+        challenges: "",
       },
     ]);
   };
@@ -251,6 +273,98 @@ export function ProfileTabsForm({ initialProfile }: ProfileTabsFormProps) {
       next[index] = { ...next[index], [field]: value };
       return next;
     });
+  };
+
+  const handleAddProjectHighlight = (projIndex: number) => {
+    setProjects((prev) => {
+      const next = [...prev];
+      next[projIndex] = {
+        ...next[projIndex],
+        highlights: [...(next[projIndex].highlights || []), ""],
+      };
+      return next;
+    });
+  };
+
+  const handleProjectHighlightChange = (
+    projIndex: number,
+    highlightIndex: number,
+    value: string
+  ) => {
+    setProjects((prev) => {
+      const next = [...prev];
+      const updatedHighlights = [...(next[projIndex].highlights || [])];
+      updatedHighlights[highlightIndex] = value;
+      next[projIndex] = {
+        ...next[projIndex],
+        highlights: updatedHighlights,
+      };
+      return next;
+    });
+  };
+
+  const handleRemoveProjectHighlight = (
+    projIndex: number,
+    highlightIndex: number
+  ) => {
+    setProjects((prev) => {
+      const next = [...prev];
+      next[projIndex] = {
+        ...next[projIndex],
+        highlights: next[projIndex].highlights.filter(
+          (_, i) => i !== highlightIndex
+        ),
+      };
+      return next;
+    });
+  };
+
+  const handleEnhanceProject = async (index: number) => {
+    const proj = projects[index];
+    if (!proj.title && !proj.description) {
+      alert("Please provide at least a project title or rough description first.");
+      return;
+    }
+
+    setEnhancingProjectIndex(index);
+    try {
+      const res = await enhanceProjectNotesAction({
+        title: proj.title || "Software Project",
+        role: proj.role,
+        techStack: proj.techStack,
+        rawDescription: proj.description || proj.title,
+        challenges: proj.challenges,
+      });
+
+      if (res.success && res.data) {
+        setProjects((prev) => {
+          const next = [...prev];
+          next[index] = {
+            ...next[index],
+            role: res.data.enhancedRole || next[index].role,
+            description: res.data.enhancedDescription || next[index].description,
+            highlights:
+              res.data.highlights && res.data.highlights.length > 0
+                ? res.data.highlights
+                : next[index].highlights,
+            techStack:
+              res.data.suggestedTechStack && res.data.suggestedTechStack.length > 0
+                ? Array.from(
+                    new Set([
+                      ...next[index].techStack,
+                      ...res.data.suggestedTechStack,
+                    ])
+                  )
+                : next[index].techStack,
+          };
+          return next;
+        });
+      }
+    } catch (err) {
+      console.error("Failed to enhance project:", err);
+    } finally {
+      setEnhancingProjectIndex(null);
+    }
   };
 
   const handleRemoveProject = (index: number) => {
@@ -842,19 +956,27 @@ export function ProfileTabsForm({ initialProfile }: ProfileTabsFormProps) {
           </div>
         </TabsContent>
 
-        {/* Tab 5: Projects */}
+        {/* Tab 5: Projects Context Knowledge Base */}
         <TabsContent value="projects" className="mt-4 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/60 pb-3">
             <div>
-              <h3 className="text-base font-bold text-foreground">Featured Projects</h3>
-              <p className="text-xs text-muted-foreground">
-                Key repositories, products, and applications you built
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-foreground">
+                  Project Context &amp; Knowledge Base
+                </h3>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                  <Sparkles className="size-3" />
+                  <span>AI Resume Ready</span>
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Detailed architecture, quantifiable impact, and challenges that Gemini pulls to generate tailored ATS resumes.
               </p>
             </div>
             <button
               type="button"
               onClick={handleAddProject}
-              className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+              className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
             >
               <Plus className="size-4" />
               <span>Add Project</span>
@@ -863,7 +985,7 @@ export function ProfileTabsForm({ initialProfile }: ProfileTabsFormProps) {
 
           {projects.length === 0 ? (
             <div className="p-8 text-center rounded-3xl border border-dashed border-border bg-card/40 text-muted-foreground">
-              No projects added yet. Click &quot;Add Project&quot; above.
+              No projects added yet. Click &quot;Add Project&quot; above to build your portfolio knowledge base.
             </div>
           ) : (
             projects.map((proj, idx) => (
@@ -871,58 +993,191 @@ export function ProfileTabsForm({ initialProfile }: ProfileTabsFormProps) {
                 key={idx}
                 className="rounded-3xl border border-border/80 bg-card p-6 shadow-sm space-y-4"
               >
+                {/* Project Card Header */}
                 <div className="flex items-center justify-between border-b border-border/60 pb-3">
-                  <span className="font-bold text-sm text-foreground">
-                    Project #{idx + 1}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveProject(idx)}
-                    className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
-                  >
-                    <Trash2 className="size-4" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sm text-foreground">
+                      Project #{idx + 1}: {proj.title || "Untitled Project"}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={enhancingProjectIndex === idx}
+                      onClick={() => handleEnhanceProject(idx)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary text-xs font-semibold border border-primary/20 transition-all cursor-pointer disabled:opacity-50"
+                      title="Auto-generate metric-driven bullets using Gemini AI"
+                    >
+                      {enhancingProjectIndex === idx ? (
+                        <>
+                          <Loader2 className="size-3.5 animate-spin" />
+                          <span>AI Polishing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="size-3.5" />
+                          <span>AI Polish</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveProject(idx)}
+                      className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+                      title="Remove Project"
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </div>
                 </div>
 
+                {/* Basic Fields: Title & Role */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                      Project Title
+                      Project Title *
                     </label>
                     <input
                       type="text"
                       value={proj.title}
                       onChange={(e) => handleProjectChange(idx, "title", e.target.value)}
-                      placeholder="e.g. AI Resume Generator"
+                      placeholder="e.g. AI Resume Generator & Job Agent"
                       className="w-full px-3.5 py-2 rounded-xl bg-background border border-border text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                      Live / GitHub URL
+                      Role / Contribution
                     </label>
                     <input
-                      type="url"
-                      value={proj.link}
-                      onChange={(e) => handleProjectChange(idx, "link", e.target.value)}
-                      placeholder="https://github.com/username/project"
+                      type="text"
+                      value={proj.role || ""}
+                      onChange={(e) => handleProjectChange(idx, "role", e.target.value)}
+                      placeholder="e.g. Lead Architect, Full-Stack Creator"
                       className="w-full px-3.5 py-2 rounded-xl bg-background border border-border text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
                     />
                   </div>
                 </div>
 
+                {/* URLs: Live Demo & GitHub */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                      Live Demo URL
+                    </label>
+                    <input
+                      type="url"
+                      value={proj.link}
+                      onChange={(e) => handleProjectChange(idx, "link", e.target.value)}
+                      placeholder="https://myproject.com"
+                      className="w-full px-3.5 py-2 rounded-xl bg-background border border-border text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                      GitHub / Code Repository URL
+                    </label>
+                    <input
+                      type="url"
+                      value={proj.githubUrl || ""}
+                      onChange={(e) => handleProjectChange(idx, "githubUrl", e.target.value)}
+                      placeholder="https://github.com/username/repo"
+                      className="w-full px-3.5 py-2 rounded-xl bg-background border border-border text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Tech Stack */}
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                    Project Description
+                    Tech Stack (Comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={proj.techStack?.join(", ") || ""}
+                    onChange={(e) =>
+                      handleProjectChange(
+                        idx,
+                        "techStack",
+                        e.target.value.split(",").map((s) => s.trim()).filter(Boolean)
+                      )
+                    }
+                    placeholder="e.g. Next.js, TypeScript, PostgreSQL, Playwright, TailwindCSS"
+                    className="w-full px-3.5 py-2 rounded-xl bg-background border border-border text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                  />
+                </div>
+
+                {/* Architecture Description */}
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                    Architecture &amp; Core Description
                   </label>
                   <textarea
                     rows={2}
                     value={proj.description}
                     onChange={(e) => handleProjectChange(idx, "description", e.target.value)}
-                    placeholder="Brief overview of features, architecture, and results..."
+                    placeholder="Describe what the project does, key architecture patterns, and what problem it solves..."
                     className="w-full p-3 rounded-xl bg-background border border-border text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
                   />
+                </div>
+
+                {/* Challenges & Solutions */}
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                    Challenges Solved &amp; Architectural Context
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={proj.challenges || ""}
+                    onChange={(e) => handleProjectChange(idx, "challenges", e.target.value)}
+                    placeholder="e.g. Handled high-throughput API rate limits with Redis token bucket; solved SSR hydration mismatches..."
+                    className="w-full p-3 rounded-xl bg-background border border-border text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                  />
+                </div>
+
+                {/* Quantifiable Highlights / Bullets */}
+                <div className="space-y-2 pt-1 border-t border-border/60">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Quantifiable Achievements &amp; Metrics (Google XYZ Formula)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => handleAddProjectHighlight(idx)}
+                      className="text-xs font-semibold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="size-3" />
+                      <span>Add Metric Bullet</span>
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {(proj.highlights || []).map((bullet, bIdx) => (
+                      <div key={bIdx} className="flex items-center gap-2">
+                        <span className="text-muted-foreground text-xs">•</span>
+                        <input
+                          type="text"
+                          value={bullet}
+                          onChange={(e) =>
+                            handleProjectHighlightChange(idx, bIdx, e.target.value)
+                          }
+                          placeholder="Accomplished [X], as measured by [Y], by doing [Z]..."
+                          className="flex-1 px-3 py-1.5 rounded-xl bg-background border border-border text-foreground text-xs sm:text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveProjectHighlight(idx, bIdx)}
+                          className="p-1 rounded-lg text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             ))

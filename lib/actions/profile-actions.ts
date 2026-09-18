@@ -122,9 +122,13 @@ export async function updateUserProfile(data: {
   }>;
   projects?: Array<{
     title: string;
+    role?: string;
     description?: string;
+    highlights?: string[];
     techStack?: string[];
     link?: string;
+    githubUrl?: string;
+    challenges?: string;
   }>;
   certifications?: Array<{
     name: string;
@@ -232,9 +236,13 @@ export async function updateUserProfile(data: {
           data: data.projects.map((p) => ({
             profileId: profile.id,
             title: p.title,
+            role: p.role || "",
             description: p.description || "",
+            highlights: p.highlights || [],
             techStack: p.techStack || [],
             link: p.link || "",
+            githubUrl: p.githubUrl || "",
+            challenges: p.challenges || "",
           })),
         });
       }

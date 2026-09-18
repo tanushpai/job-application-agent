@@ -1,20 +1,31 @@
 import type { Metadata } from "next";
-import { getUserResumes } from "@/lib/actions/resume-actions";
-import { ResumeList } from "@/components/dashboard/resume-list";
+import { getUserResumesWithMetadata } from "@/lib/actions/tailored-resume-actions";
+import { getUserProfile } from "@/lib/actions/profile-actions";
+import { getSavedJobsForUser } from "@/lib/actions/jobs-actions";
+import { ResumeStudio } from "@/components/dashboard/resume/resume-studio";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Resumes | JobBuddy AI",
-  description: "AI-tailored resume manager, document uploads, and parsed skills.",
+  title: "AI Resume Studio | JobBuddy AI",
+  description: "AI-tailored resume generator, ATS-compliant Jake's Resume standard, and document manager.",
 };
 
 export default async function ResumePage() {
-  const resumes = await getUserResumes();
+  const [resumes, profile, savedJobs] = await Promise.all([
+    getUserResumesWithMetadata(),
+    getUserProfile(),
+    getSavedJobsForUser(),
+  ]);
 
   return (
     <div className="max-w-6xl mx-auto">
-      <ResumeList initialResumes={resumes} />
+      <ResumeStudio
+        initialResumes={resumes}
+        userProfile={profile}
+        savedJobs={savedJobs}
+      />
     </div>
   );
 }
+
