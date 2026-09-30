@@ -15,12 +15,9 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
-  ChevronRight,
-  Sparkles,
-  Layers,
   ArrowRight,
   Eye,
-  FileText,
+  Sparkles,
 } from "lucide-react";
 import { retryApplication, cancelApplication } from "@/lib/actions/application-actions";
 import Link from "next/link";
@@ -58,9 +55,9 @@ export interface ApplicationRecord {
   job: {
     title: string;
     company: string;
-    location: string;
-    locationType: string;
-    applyUrl: string;
+    location: string | null;
+    locationType: string | null;
+    applyUrl: string | null;
   };
   events: Array<{
     id: string;
@@ -87,12 +84,17 @@ const STAGES = [
 ];
 
 export function ApplicationTracker({ initialApplications }: { initialApplications: ApplicationRecord[] }) {
-  const [applications, setApplications] = useState<ApplicationRecord[]>(initialApplications);
+  const applications = initialApplications;
   const [selectedAppId, setSelectedAppId] = useState<string | null>(
     initialApplications[0]?.id || null
   );
   const [actionLoading, setActionLoading] = useState(false);
   const router = useRouter();
+
+  const effectiveSelectedAppId = 
+    selectedAppId && applications.some((a) => a.id === selectedAppId)
+      ? selectedAppId
+      : applications[0]?.id || null;
 
   // Poll for real-time status updates every 3 seconds for active jobs
   useEffect(() => {
@@ -114,14 +116,7 @@ export function ApplicationTracker({ initialApplications }: { initialApplication
     return () => clearInterval(interval);
   }, [applications, router]);
 
-  useEffect(() => {
-    setApplications(initialApplications);
-    if (!selectedAppId && initialApplications.length > 0) {
-      setSelectedAppId(initialApplications[0].id);
-    }
-  }, [initialApplications, selectedAppId]);
-
-  const selectedApp = applications.find((a) => a.id === selectedAppId);
+  const selectedApp = applications.find((a) => a.id === effectiveSelectedAppId);
 
   const handleRetry = async (appId: string) => {
     setActionLoading(true);
@@ -284,7 +279,7 @@ export function ApplicationTracker({ initialApplications }: { initialApplication
                     </Button>
                   )}
                   <a
-                    href={selectedApp.appliedUrl || selectedApp.job.applyUrl}
+                    href={selectedApp.appliedUrl ?? selectedApp.job.applyUrl ?? "#"}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -425,6 +420,7 @@ export function ApplicationTracker({ initialApplications }: { initialApplication
                           rel="noopener noreferrer"
                           className="group relative aspect-video overflow-hidden rounded-lg border border-border/60 bg-muted/40 hover:border-primary transition-all"
                         >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={imgUrl}
                             alt={`Step Screenshot ${idx + 1}`}

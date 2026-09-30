@@ -123,8 +123,8 @@ export class LeverConnector implements JobConnector {
     try {
       const res = await fetch('https://api.lever.co/v0/postings/spotify?mode=json&limit=1');
       return { success: res.ok };
-    } catch (e: any) {
-      return { success: false, message: e?.message || 'Connection failed' };
+    } catch (e: unknown) {
+      return { success: false, message: (e as Error)?.message || 'Connection failed' };
     }
   }
 }

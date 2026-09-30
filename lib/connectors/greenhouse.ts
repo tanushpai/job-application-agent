@@ -129,8 +129,8 @@ export class GreenhouseConnector implements JobConnector {
         headers: { 'Accept': 'application/json' },
       });
       return { success: res.ok };
-    } catch (e: any) {
-      return { success: false, message: e?.message || 'Connection failed' };
+    } catch (e: unknown) {
+      return { success: false, message: (e as Error)?.message || 'Connection failed' };
     }
   }
 }

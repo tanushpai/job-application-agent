@@ -125,7 +125,8 @@ async function syncConnectorJobs(slug: string) {
         lastError: null,
       },
     });
-  } catch (err: any) {
+  } catch (_err: unknown) {
+    const err = _err as Error;
     await prisma.connectorSource.update({
       where: { id: dbConnector.id },
       data: {
@@ -192,7 +193,7 @@ export async function getJobsForUser(options: GetJobsOptions = {}): Promise<Disc
   }
 
   // 3. Build query filters
-  const where: any = {
+  const where: Record<string, unknown> = {
     isActive: true,
   };
 
@@ -251,7 +252,7 @@ export async function getJobsForUser(options: GetJobsOptions = {}): Promise<Disc
   }
 
   // Determine Prisma orderBy clause
-  let orderBy: any = { postedAt: "desc" };
+  let orderBy: Record<string, string> = { postedAt: "desc" };
   if (options.sortBy === "company") {
     orderBy = { company: "asc" };
   } else if (options.sortBy === "recent") {

@@ -122,6 +122,9 @@ model Resume {
 
   applications Application[]
 
+  @@index([userId, isDefault])
+  @@index([userId, isTailored])
+  @@index([userId, createdAt])
   @@map("resumes")
 }
 
@@ -140,6 +143,7 @@ model Experience {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  @@index([profileId])
   @@map("experiences")
 }
 
@@ -156,6 +160,7 @@ model Education {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
+  @@index([profileId])
   @@map("educations")
 }
 
@@ -167,6 +172,7 @@ model Skill {
   category  String   @default("Technical")
   createdAt DateTime @default(now()) @map("created_at")
 
+  @@index([profileId])
   @@map("skills")
 }
 
@@ -185,6 +191,7 @@ model Project {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  @@index([profileId])
   @@map("projects")
 }
 
@@ -198,6 +205,7 @@ model Certification {
   url       String?
   createdAt DateTime @default(now()) @map("created_at")
 
+  @@index([profileId])
   @@map("certifications")
 }
 
@@ -256,6 +264,7 @@ model Job {
 
   @@index([company])
   @@index([isActive])
+  @@index([firstSeenAt, isActive])
   @@map("jobs")
 }
 
@@ -299,6 +308,7 @@ model SavedJob {
   job  Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@unique([userId, jobId])
+  @@index([userId, savedAt])
   @@map("saved_jobs")
 }
 
@@ -358,7 +368,7 @@ model Application {
   events          ApplicationEvent[]
   browserSessions BrowserSession[]
 
-  @@index([userId, status])
+  @@index([userId, status, createdAt])
   @@index([jobId])
   @@map("applications")
 }
@@ -439,8 +449,6 @@ model CustomCompanyConnector {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId])
+  @@index([userId, status])
   @@map("custom_company_connectors")
 }
-
-

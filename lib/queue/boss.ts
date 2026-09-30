@@ -69,7 +69,7 @@ export async function enqueueApplicationJob(payload: ApplicationJobPayload): Pro
       retryLimit: 2,
       retryDelay: 10,
       expireInSeconds: 900,
-    } as any
+    } as Parameters<typeof boss.send>[2]
   );
 
   return jobId;

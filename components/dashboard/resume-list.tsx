@@ -12,7 +12,6 @@ import {
   CheckCircle2,
   Loader2,
   Sparkles,
-  ExternalLink,
   Plus,
 } from "lucide-react";
 import { deleteResume, uploadAndParseResume } from "@/lib/actions/resume-actions";

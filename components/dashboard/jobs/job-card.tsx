@@ -8,7 +8,6 @@ import {
   Building2, 
   MapPin, 
   Bookmark, 
-  ExternalLink, 
   Sparkles, 
   Cable, 
   Calendar,

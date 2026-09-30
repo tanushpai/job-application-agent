@@ -1,6 +1,7 @@
-import { BrowserAutomationProvider, InspectionResult } from "../types";
+import { BrowserAutomationProvider } from "../types";
 import { ProfileData, mapProfileToFields } from "../profile-mapper";
 import { prisma } from "@/lib/prisma";
+import { Prisma, ApplicationStatus } from "@prisma/client";
 import path from "path";
 import fs from "fs/promises";
 
@@ -15,7 +16,7 @@ export interface HandlerExecutionContext {
     fileName: string;
   } | null;
   logEvent: (eventType: string, stage: string, message: string, metadata?: object) => Promise<void>;
-  updateStatus: (status: any, failureReason?: string, missingFields?: any) => Promise<void>;
+  updateStatus: (status: ApplicationStatus, failureReason?: string, missingFields?: Prisma.InputJsonValue) => Promise<void>;
   recordScreenshot: (name: string) => Promise<string | null>;
 }
 
@@ -56,7 +57,7 @@ export abstract class BasePlatformHandler {
           fieldType: field.fieldType,
           isRequired: field.isRequired,
           placeholder: field.placeholder,
-          options: field.options ? (field.options as any) : undefined,
+          options: field.options ? (field.options as unknown as Prisma.InputJsonValue) : undefined,
           detectedMeaning: field.detectedMeaning,
           selector: field.selector,
           confidence: field.confidence,
@@ -74,7 +75,7 @@ export abstract class BasePlatformHandler {
     if (mapping.customQuestions.length > 0) {
       await prisma.application.update({
         where: { id: ctx.applicationId },
-        data: { customQuestions: mapping.customQuestions as any },
+        data: { customQuestions: mapping.customQuestions as unknown as Prisma.InputJsonValue },
       });
     }
 

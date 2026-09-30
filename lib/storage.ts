@@ -89,7 +89,7 @@ export async function uploadResumeFile(
 /**
  * Deletes a resume file from storage.
  */
-export async function deleteResumeFile(fileKeyOrUrl: string, userId: string): Promise<void> {
+export async function deleteResumeFile(fileKeyOrUrl: string, _userId: string): Promise<void> {
   if (isSupabaseConfigured && supabase && !fileKeyOrUrl.startsWith("/uploads/")) {
     try {
       await supabase.storage.from("resumes").remove([fileKeyOrUrl]);

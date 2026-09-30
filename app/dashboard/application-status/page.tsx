@@ -4,6 +4,7 @@ import { ApplicationTracker } from "@/components/dashboard/applications/applicat
 import { ListTodo, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import type { MissingFieldInfo, CustomQuestionAnswer } from "@/types/application";
 
 export const metadata: Metadata = {
   title: "Application Status | JobBuddy AI",
@@ -22,8 +23,8 @@ export default async function ApplicationStatusPage() {
       ...ev,
       createdAt: ev.createdAt.toISOString(),
     })),
-    missingFields: app.missingFields as any,
-    customQuestions: app.customQuestions as any,
+    missingFields: (app.missingFields as unknown as MissingFieldInfo[]) || null,
+    customQuestions: (app.customQuestions as unknown as CustomQuestionAnswer[]) || null,
     browserSessions: app.browserSessions.map((bs) => ({
       ...bs,
       screenshotPaths: (bs.screenshotPaths as string[]) || [],
@@ -54,7 +55,7 @@ export default async function ApplicationStatusPage() {
       </div>
 
       {/* Main Tracker */}
-      <ApplicationTracker initialApplications={applications as any} />
+      <ApplicationTracker initialApplications={applications} />
     </div>
   );
 }

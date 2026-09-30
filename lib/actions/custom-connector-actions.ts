@@ -72,13 +72,16 @@ export async function addCustomCompanyConnector(data: {
         revalidatePath("/dashboard/jobs");
         revalidatePath("/dashboard");
       })
-      .catch((err) => console.error("Initial custom sync error:", err));
+      .catch((err: unknown) => console.error("Initial custom sync error:", err));
 
     revalidatePath("/dashboard/connectors");
     return { success: true, connector };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error in addCustomCompanyConnector:", error);
-    return { success: false, error: error.message || "Failed to create custom connector" };
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to create custom connector",
+    };
   }
 }
 
@@ -89,7 +92,18 @@ export async function getCustomCompanyConnectors(): Promise<CustomConnectorData[
   try {
     const user = await requireAuth();
 
-    const rows: any[] = await prisma.$queryRawUnsafe(
+    const rows: Array<{
+      id: string;
+      companyName: string;
+      careersUrl: string;
+      logoUrl?: string | null;
+      targetRoles: string[];
+      status: string;
+      jobCount: number;
+      lastSyncedAt?: string | null;
+      lastError?: string | null;
+      createdAt: string;
+    }> = await prisma.$queryRawUnsafe(
       `SELECT id, company_name as "companyName", careers_url as "careersUrl", logo_url as "logoUrl", target_roles as "targetRoles", status, job_count as "jobCount", last_synced_at as "lastSyncedAt", last_error as "lastError", created_at as "createdAt"
        FROM custom_company_connectors
        WHERE user_id = $1
@@ -97,7 +111,7 @@ export async function getCustomCompanyConnectors(): Promise<CustomConnectorData[
       user.id
     );
 
-    return rows.map((c: any) => ({
+    return rows.map((c) => ({
       id: c.id,
       companyName: c.companyName,
       careersUrl: c.careersUrl,
@@ -129,9 +143,12 @@ export async function syncCustomCompanyConnector(connectorId: string) {
     revalidatePath("/dashboard");
 
     return result;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error syncing custom connector:", error);
-    return { success: false, error: error.message };
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to sync custom connector",
+    };
   }
 }
 
@@ -153,8 +170,11 @@ export async function deleteCustomCompanyConnector(connectorId: string) {
     revalidatePath("/dashboard");
 
     return { success: true };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error deleting custom connector:", error);
-    return { success: false, error: error.message };
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to delete custom connector",
+    };
   }
 }

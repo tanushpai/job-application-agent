@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Sparkles, ExternalLink, Bot, User, CheckCircle2, FileText, Star, ArrowRight } from "lucide-react";
+import { Sparkles, ExternalLink, Bot, User, FileText, ArrowRight } from "lucide-react";
 import { createApplication } from "@/lib/actions/application-actions";
 import { getUserResumesWithMetadata } from "@/lib/actions/tailored-resume-actions";
 import { useRouter } from "next/navigation";
@@ -26,7 +26,7 @@ interface ApplyModalProps {
 }
 
 export function ApplyModal({ isOpen, onClose, job }: ApplyModalProps) {
-  const [loadingMode, setLoadingMode] = useState<"manual" | "auto" | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [resumes, setResumes] = useState<any[]>([]);
   const [selectedResumeId, setSelectedResumeId] = useState<string>("");
@@ -34,24 +34,35 @@ export function ApplyModal({ isOpen, onClose, job }: ApplyModalProps) {
   const router = useRouter();
 
   useEffect(() => {
+    let isMounted = true;
     if (isOpen) {
-      setIsLoadingResumes(true);
-      getUserResumesWithMetadata()
-        .then((data) => {
+      const loadResumes = async () => {
+        try {
+          setIsLoadingResumes(true);
+          const data = await getUserResumesWithMetadata();
+          if (!isMounted) return;
           setResumes(data);
-          // Pre-select default resume or first resume
           const defaultResume = data.find((r) => r.isDefault) || data[0];
           if (defaultResume) {
             setSelectedResumeId(defaultResume.id);
           }
-        })
-        .catch((err) => console.error("Failed to load resumes:", err))
-        .finally(() => setIsLoadingResumes(false));
+        } catch (err) {
+          console.error("Failed to load resumes:", err);
+        } finally {
+          if (isMounted) {
+            setIsLoadingResumes(false);
+          }
+        }
+      };
+      loadResumes();
     }
+    return () => {
+      isMounted = false;
+    };
   }, [isOpen]);
 
   const handleManualApply = async () => {
-    setLoadingMode("manual");
+    setIsSubmitting(true);
     try {
       // 1. Open job URL in new tab
       window.open(job.applyUrl, "_blank", "noopener,noreferrer");
@@ -67,12 +78,12 @@ export function ApplyModal({ isOpen, onClose, job }: ApplyModalProps) {
     } catch (err) {
       console.error("Manual apply tracking failed:", err);
     } finally {
-      setLoadingMode(null);
+      setIsSubmitting(false);
     }
   };
 
   const handleAutoApply = async () => {
-    setLoadingMode("auto");
+    setIsSubmitting(true);
     try {
       await createApplication({
         jobId: job.id,
@@ -84,7 +95,7 @@ export function ApplyModal({ isOpen, onClose, job }: ApplyModalProps) {
     } catch (err) {
       console.error("Auto apply dispatch failed:", err);
     } finally {
-      setLoadingMode(null);
+      setIsSubmitting(false);
     }
   };
 
@@ -199,8 +210,8 @@ export function ApplyModal({ isOpen, onClose, job }: ApplyModalProps) {
         </div>
 
         <div className="flex justify-end gap-2 border-t border-border/40 pt-3">
-          <Button variant="ghost" size="sm" onClick={onClose} className="text-xs rounded-xl">
-            Cancel
+          <Button variant="ghost" size="sm" onClick={onClose} disabled={isSubmitting} className="text-xs rounded-xl">
+            {isSubmitting ? "Submitting…" : "Cancel"}
           </Button>
         </div>
       </DialogContent>

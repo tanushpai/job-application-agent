@@ -1,118 +1,9 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { TailoredResumePayload, TailoringPreset } from "@/types/resume";
+import { UserProfileData } from "@/types/profile";
+import { withRetry } from "@/lib/utils/retry";
 
-export interface TailoredResumePayload {
-  title: string;
-  targetRole: string;
-  targetCompany: string;
-  preset: "ats_optimized" | "metric_heavy" | "technical_depth" | "executive";
-  atsScore: number;
-  scoreBreakdown: {
-    keywordMatch: number;
-    experienceRelevance: number;
-    skillsAlignment: number;
-    formattingReadiness: number;
-  };
-  matchedSkills: string[];
-  missingSkills: string[];
-  recommendations: string[];
-
-  // Jake's Resume Standard Content
-  personalInfo: {
-    fullName: string;
-    email: string;
-    phone: string;
-    location: string;
-    linkedin: string;
-    github: string;
-    portfolio: string;
-  };
-  summary: string;
-  skillsCategorized: {
-    languages: string[];
-    frameworksAndLibraries: string[];
-    developerTools: string[];
-    cloudAndDatabases: string[];
-  };
-  experiences: Array<{
-    company: string;
-    title: string;
-    location: string;
-    startDate: string;
-    endDate: string;
-    highlights: string[];
-  }>;
-  projects: Array<{
-    title: string;
-    role?: string;
-    techStack: string[];
-    link?: string;
-    githubUrl?: string;
-    highlights: string[];
-  }>;
-  educations: Array<{
-    institution: string;
-    degree: string;
-    fieldOfStudy: string;
-    startDate: string;
-    endDate: string;
-    grade?: string;
-  }>;
-  certifications?: Array<{
-    name: string;
-    issuer?: string;
-    issueDate?: string;
-    url?: string;
-  }>;
-}
-
-export interface UserProfileContext {
-  fullName?: string;
-  email?: string;
-  phone?: string;
-  location?: string;
-  headline?: string;
-  summary?: string;
-  website?: string;
-  linkedin?: string;
-  github?: string;
-  twitter?: string;
-  skills: Array<{ name: string; category?: string }>;
-  experiences: Array<{
-    company: string;
-    title: string;
-    location?: string;
-    startDate?: string;
-    endDate?: string;
-    isCurrent?: boolean;
-    description?: string;
-    highlights?: string[];
-  }>;
-  educations: Array<{
-    institution: string;
-    degree?: string;
-    fieldOfStudy?: string;
-    startDate?: string;
-    endDate?: string;
-    grade?: string;
-  }>;
-  projects: Array<{
-    id?: string;
-    title: string;
-    role?: string;
-    description?: string;
-    highlights?: string[];
-    techStack?: string[];
-    link?: string;
-    githubUrl?: string;
-    challenges?: string;
-  }>;
-  certifications: Array<{
-    name: string;
-    issuer?: string;
-    issueDate?: string;
-    url?: string;
-  }>;
-}
+export type { TailoredResumePayload };
 
 /**
  * Tailors a complete resume matching the target Job Description using Google Gemini AI,
@@ -126,11 +17,11 @@ export async function tailorResumeWithGemini({
   preset = "ats_optimized",
   selectedProjectIds,
 }: {
-  profile: UserProfileContext;
+  profile: UserProfileData;
   jobDescription: string;
   targetRole?: string;
   targetCompany?: string;
-  preset?: "ats_optimized" | "metric_heavy" | "technical_depth" | "executive";
+  preset?: TailoringPreset;
   selectedProjectIds?: string[];
 }): Promise<TailoredResumePayload> {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -140,7 +31,6 @@ export async function tailorResumeWithGemini({
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  // Using gemini-1.5-flash for high structured JSON accuracy
   const model = genAI.getGenerativeModel({
     model: "gemini-1.5-flash",
     generationConfig: {
@@ -149,13 +39,12 @@ export async function tailorResumeWithGemini({
     },
   });
 
-  // Filter projects if specific ones were picked
   const candidateProjects =
     selectedProjectIds && selectedProjectIds.length > 0
-      ? profile.projects.filter((p) => p.id && selectedProjectIds.includes(p.id))
-      : profile.projects;
+      ? (profile.projects || []).filter((p) => p.id && selectedProjectIds.includes(p.id))
+      : profile.projects || [];
 
-  const presetInstructions = {
+  const presetInstructions: Record<TailoringPreset, string> = {
     ats_optimized: `
 - Prioritize exact keyword matching with the Job Description throughout skills and experience bullets.
 - Ensure all ATS parsable acronyms and technical terms in the JD are seamlessly woven into real accomplishments.
@@ -169,7 +58,7 @@ export async function tailorResumeWithGemini({
     executive: `
 - Focus on high-level business leadership, strategic ownership, cross-functional execution, project velocity, and end-to-end deliverables.
 - Keep bullets crisp and executive-ready.`,
-  }[preset];
+  };
 
   const prompt = `
 You are the world's leading technical recruiter and ATS resume optimization expert.
@@ -180,7 +69,7 @@ Target Company: ${targetCompany || "Target Employer"}
 Tailoring Strategy: ${preset}
 
 STRATEGY INSTRUCTIONS:
-${presetInstructions}
+${presetInstructions[preset]}
 
 CANDIDATE MASTER PROFILE:
 ${JSON.stringify({
@@ -271,8 +160,8 @@ JSON OUTPUT SCHEMA:
       "link": "https://demo.com",
       "githubUrl": "https://github.com/...",
       "highlights": [
-        "Built high-throughput data processing pipeline handling 10k requests/sec...",
-        "Implemented real-time synchronization with WebSockets and Redis..."
+        "Built high-throughput data processing pipeline...",
+        "Implemented real-time synchronization..."
       ]
     }
   ],
@@ -298,11 +187,18 @@ JSON OUTPUT SCHEMA:
 `;
 
   try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    const result = await withRetry(async () => {
+      return await model.generateContent(prompt);
+    });
+
+    let text = result.response.text().trim();
+    if (text.startsWith("```json")) {
+      text = text.replace(/^```json\s*/, "").replace(/\s*```$/, "");
+    }
+
     const parsed: TailoredResumePayload = JSON.parse(text);
 
-    // Fallbacks if some fields are missing
+    // Fallbacks if personalInfo fields are empty
     if (!parsed.personalInfo.fullName && profile.fullName) {
       parsed.personalInfo.fullName = profile.fullName;
     }
@@ -386,8 +282,14 @@ Return strictly valid JSON:
 `;
 
   try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    const result = await withRetry(async () => {
+      return await model.generateContent(prompt);
+    });
+
+    let text = result.response.text().trim();
+    if (text.startsWith("```json")) {
+      text = text.replace(/^```json\s*/, "").replace(/\s*```$/, "");
+    }
     return JSON.parse(text);
   } catch (err) {
     console.error("Gemini project enhance error:", err);

@@ -9,10 +9,12 @@ import { chromium } from "playwright";
 import {
   tailorResumeWithGemini,
   enhanceProjectWithGemini,
-  TailoredResumePayload,
-  UserProfileContext,
 } from "@/lib/ai/gemini-tailor";
+import { TailoredResumePayload, TailoringPreset, ResumeMetadata } from "@/types/resume";
+import { UserProfileData } from "@/types/profile";
+import { ActionResponse } from "@/types/common";
 import { generateJakesResumeHtml } from "@/lib/utils/jakes-resume-template";
+import { successResponse, errorResponse } from "@/lib/utils/action-utils";
 
 const UPLOADS_DIR = path.join(process.cwd(), "public", "uploads", "resumes");
 
@@ -29,13 +31,9 @@ export async function generateAITailoredResumeAction({
   jobDescription: string;
   targetRole?: string;
   targetCompany?: string;
-  preset?: "ats_optimized" | "metric_heavy" | "technical_depth" | "executive";
+  preset?: TailoringPreset;
   selectedProjectIds?: string[];
-}): Promise<{
-  success: boolean;
-  payload?: TailoredResumePayload;
-  error?: string;
-}> {
+}): Promise<ActionResponse<TailoredResumePayload>> {
   try {
     const user = await requireAuth();
 
@@ -52,13 +50,12 @@ export async function generateAITailoredResumeAction({
     });
 
     if (!profile) {
-      return {
-        success: false,
-        error: "Please complete your profile or upload a base resume before generating tailored versions.",
-      };
+      return errorResponse(
+        "Please complete your profile or upload a base resume before generating tailored versions."
+      );
     }
 
-    const profileContext: UserProfileContext = {
+    const profileContext: UserProfileData = {
       fullName: profile.fullName || user.name || "Candidate",
       email: profile.email || user.email || "",
       phone: profile.phone || "",
@@ -116,16 +113,9 @@ export async function generateAITailoredResumeAction({
       selectedProjectIds,
     });
 
-    return {
-      success: true,
-      payload: tailoredPayload,
-    };
+    return successResponse(tailoredPayload);
   } catch (err) {
-    console.error("generateAITailoredResumeAction error:", err);
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : "Failed to generate tailored resume.",
-    };
+    return errorResponse(err, "GENERATE_TAILORED_RESUME_FAILED");
   }
 }
 
@@ -136,49 +126,66 @@ export async function enhanceProjectNotesAction({
   title,
   role,
   techStack,
+  description,
   rawDescription,
+  highlights,
   challenges,
 }: {
   title: string;
   role?: string;
   techStack?: string[];
-  rawDescription: string;
+  description?: string;
+  rawDescription?: string;
+  highlights?: string[];
   challenges?: string;
-}) {
+}): Promise<ActionResponse<{
+  enhancedRole: string;
+  enhancedDescription: string;
+  highlights: string[];
+  suggestedTechStack: string[];
+}>> {
   try {
     await requireAuth();
+    const effectiveDescription =
+      rawDescription ||
+      description ||
+      highlights?.join("\n") ||
+      title;
+
     const enhanced = await enhanceProjectWithGemini({
       title,
       role,
       techStack,
-      rawDescription,
+      rawDescription: effectiveDescription,
       challenges,
     });
 
-    return { success: true, data: enhanced };
+    return successResponse(enhanced);
   } catch (err) {
-    console.error("enhanceProjectNotesAction error:", err);
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : "Failed to enhance project.",
-    };
+    return errorResponse(err, "ENHANCE_PROJECT_FAILED");
   }
 }
-
 
 /**
  * Saves an AI-tailored resume to storage and Prisma database,
  * compiling a vector PDF with Playwright and Jake's Resume Overleaf styling.
  */
-export async function saveTailoredResumeAction(payload: TailoredResumePayload) {
+export async function saveTailoredResumeAction(
+  payload: TailoredResumePayload,
+  setAsDefault = true
+): Promise<ActionResponse<ResumeMetadata>> {
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
   try {
     const user = await requireAuth();
 
     // 1. Generate Jake's Resume HTML
     const htmlContent = generateJakesResumeHtml(payload);
 
-    // 2. Render vector PDF using Playwright headless
-    const browser = await chromium.launch({ headless: true });
+    // 2. Render vector PDF using Playwright headless with try...finally guard
+    browser = await chromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    });
     const page = await browser.newPage();
     await page.setContent(htmlContent, { waitUntil: "networkidle" });
     const pdfBuffer = await page.pdf({
@@ -191,7 +198,6 @@ export async function saveTailoredResumeAction(payload: TailoredResumePayload) {
         right: "0.45in",
       },
     });
-    await browser.close();
 
     // 3. Write PDF buffer to storage
     await fs.mkdir(UPLOADS_DIR, { recursive: true });
@@ -206,7 +212,15 @@ export async function saveTailoredResumeAction(payload: TailoredResumePayload) {
     await fs.writeFile(localFilePath, pdfBuffer);
     const fileUrl = `/uploads/resumes/${uniqueFileName}`;
 
-    // 4. Save Resume record in Prisma
+    // 4. If setting default, unset existing default
+    if (setAsDefault) {
+      await prisma.resume.updateMany({
+        where: { userId: user.id, isDefault: true },
+        data: { isDefault: false },
+      });
+    }
+
+    // 5. Save Resume record in Prisma
     const resume = await prisma.resume.create({
       data: {
         userId: user.id,
@@ -223,6 +237,7 @@ export async function saveTailoredResumeAction(payload: TailoredResumePayload) {
         atsScore: payload.atsScore || null,
         matchedSkills: payload.matchedSkills || [],
         missingSkills: payload.missingSkills || [],
+        isDefault: setAsDefault,
       },
     });
 
@@ -230,36 +245,32 @@ export async function saveTailoredResumeAction(payload: TailoredResumePayload) {
     revalidatePath("/dashboard/jobs");
     revalidatePath("/dashboard");
 
-    return {
-      success: true,
-      resumeId: resume.id,
-      fileUrl: resume.fileUrl,
-      fileName: resume.fileName,
-      message: "Tailored resume saved and compiled to Jake's ATS format PDF successfully!",
-    };
+    return successResponse(resume as unknown as ResumeMetadata, "Tailored resume saved and compiled successfully!");
   } catch (err) {
-    console.error("saveTailoredResumeAction error:", err);
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : "Failed to compile and save tailored resume.",
-    };
+    return errorResponse(err, "SAVE_TAILORED_RESUME_FAILED");
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+      } catch {
+        // safe close
+      }
+    }
   }
 }
 
 /**
  * Sets a resume as the user's primary default resume.
  */
-export async function setDefaultResumeAction(resumeId: string) {
+export async function setDefaultResumeAction(resumeId: string): Promise<ActionResponse<void>> {
   try {
     const user = await requireAuth();
 
-    // Unset current default
     await prisma.resume.updateMany({
       where: { userId: user.id, isDefault: true },
       data: { isDefault: false },
     });
 
-    // Set new default
     await prisma.resume.update({
       where: { id: resumeId, userId: user.id },
       data: { isDefault: true },
@@ -267,23 +278,23 @@ export async function setDefaultResumeAction(resumeId: string) {
 
     revalidatePath("/dashboard/resume");
     revalidatePath("/dashboard/jobs");
-    return { success: true };
+    return successResponse(undefined, "Default resume updated.");
   } catch (err) {
-    console.error("setDefaultResumeAction error:", err);
-    return { success: false, error: "Failed to set default resume." };
+    return errorResponse(err, "SET_DEFAULT_RESUME_FAILED");
   }
 }
 
 /**
  * Fetches all resumes for the user including tailored metadata.
  */
-export async function getUserResumesWithMetadata() {
+export async function getUserResumesWithMetadata(): Promise<ResumeMetadata[]> {
   try {
     const user = await requireAuth();
-    return await prisma.resume.findMany({
+    const list = await prisma.resume.findMany({
       where: { userId: user.id },
       orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
     });
+    return list as unknown as ResumeMetadata[];
   } catch (err) {
     console.error("getUserResumesWithMetadata error:", err);
     return [];

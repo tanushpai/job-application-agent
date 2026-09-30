@@ -87,54 +87,56 @@ export async function checkUserOnboardingStatus() {
   }
 }
 
+
+
 /**
  * Updates user profile and related relational sections.
  */
 export async function updateUserProfile(data: {
-  fullName?: string;
-  email?: string;
-  phone?: string;
-  location?: string;
-  headline?: string;
-  summary?: string;
-  website?: string;
-  linkedin?: string;
-  github?: string;
-  twitter?: string;
+  fullName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  location?: string | null;
+  headline?: string | null;
+  summary?: string | null;
+  website?: string | null;
+  linkedin?: string | null;
+  github?: string | null;
+  twitter?: string | null;
   skills?: Array<{ name: string; category?: string }>;
   experiences?: Array<{
     company: string;
     title: string;
-    location?: string;
-    startDate?: string;
-    endDate?: string;
+    location?: string | null;
+    startDate?: string | null;
+    endDate?: string | null;
     isCurrent?: boolean;
-    description?: string;
+    description?: string | null;
     highlights?: string[];
   }>;
   educations?: Array<{
     institution: string;
-    degree?: string;
-    fieldOfStudy?: string;
-    startDate?: string;
-    endDate?: string;
-    grade?: string;
+    degree?: string | null;
+    fieldOfStudy?: string | null;
+    startDate?: string | null;
+    endDate?: string | null;
+    grade?: string | null;
   }>;
   projects?: Array<{
     title: string;
-    role?: string;
-    description?: string;
+    role?: string | null;
+    description?: string | null;
     highlights?: string[];
     techStack?: string[];
-    link?: string;
-    githubUrl?: string;
-    challenges?: string;
+    link?: string | null;
+    githubUrl?: string | null;
+    challenges?: string | null;
   }>;
   certifications?: Array<{
     name: string;
-    issuer?: string;
-    issueDate?: string;
-    url?: string;
+    issuer?: string | null;
+    issueDate?: string | null;
+    url?: string | null;
   }>;
 }) {
   try {

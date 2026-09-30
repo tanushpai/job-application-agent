@@ -27,7 +27,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { refreshAllConnectors } from "@/lib/actions/jobs-actions";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 interface JobFiltersProps {
   initialSearch?: string;
@@ -83,7 +83,6 @@ export function JobFilters({
   totalJobsCount,
 }: JobFiltersProps) {
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   const [search, setSearch] = useState(initialSearch);
   const [location, setLocation] = useState(initialLocation);

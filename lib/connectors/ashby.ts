@@ -1,5 +1,17 @@
 import { JobConnector, ConnectorResult, SearchCriteria, NormalizedJob } from './types';
 
+interface AshbyRawJob {
+  id: string;
+  title: string;
+  location?: string;
+  address?: { postalAddress?: { addressLocality?: string } };
+  isRemote?: boolean;
+  employmentType?: string;
+  jobUrl?: string;
+  applyUrl?: string;
+  publishedAt?: string;
+}
+
 // Curated companies using Ashby
 const ASHBY_COMPANIES = [
   'openai',
@@ -46,8 +58,8 @@ export class AshbyConnector implements JobConnector {
 
         if (!res.ok) return [];
 
-        const data = await res.json();
-        const rawJobs: any[] = data.jobs || [];
+        const data = await res.json() as { jobs?: AshbyRawJob[] };
+        const rawJobs: AshbyRawJob[] = data.jobs || [];
         const formattedCompany = company.charAt(0).toUpperCase() + company.slice(1);
 
         return rawJobs.map((raw): NormalizedJob => {
@@ -107,8 +119,8 @@ export class AshbyConnector implements JobConnector {
     try {
       const res = await fetch('https://api.ashbyhq.com/posting-api/job-board/ramp');
       return { success: res.ok };
-    } catch (e: any) {
-      return { success: false, message: e?.message || 'Connection failed' };
+    } catch (e: unknown) {
+      return { success: false, message: (e as Error)?.message || 'Connection failed' };
     }
   }
 }

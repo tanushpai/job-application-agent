@@ -15,6 +15,7 @@ export type UploadResumeResponse = {
   message?: string;
   error?: string;
   resumeId?: string;
+  resume?: unknown;
   parsedData?: ParsedResumeData;
 };
 
@@ -184,6 +185,7 @@ export async function uploadAndParseResume(
       success: true,
       message: "Resume uploaded, parsed by Gemini AI, and profile populated successfully!",
       resumeId: resume.id,
+      resume,
       parsedData,
     };
   } catch (error) {

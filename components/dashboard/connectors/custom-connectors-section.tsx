@@ -10,7 +10,6 @@ import {
   RotateCcw, 
   Trash2, 
   ExternalLink, 
-  Sparkles, 
   Layers, 
   Clock, 
   AlertCircle,

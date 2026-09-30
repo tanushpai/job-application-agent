@@ -1,7 +1,8 @@
 import prisma from "@/lib/prisma";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getCompanyLogoUrls } from "@/lib/utils/company-logo";
-import { chromium } from "playwright";
+import { ScrapedJobPayload } from "@/types/job";
+import { scrapeKnownDirectATS } from "./scrapers/direct-ats-scraper";
+import { scrapeWithPlaywrightInterceptor } from "./scrapers/playwright-interceptor";
 
 export interface CustomScrapeResult {
   success: boolean;
@@ -15,797 +16,165 @@ export interface CustomScrapeResult {
   }>;
 }
 
-interface RawExtractedJob {
-  title: string;
-  location?: string;
-  locationType?: "remote" | "onsite" | "hybrid";
-  jobType?: "full_time" | "part_time" | "contract" | "internship";
-  experienceLevel?: "entry" | "mid" | "senior" | "lead";
-  description?: string;
-  skills?: string[];
-  applyUrl: string;
-}
-
-// Known company ATS mappings for effortless auto-resolution
-const KNOWN_COMPANY_ATS_DIRECT_MAP: Record<string, string> = {
-  nvidia: "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs",
-  target: "https://target.wd5.myworkdayjobs.com/wday/cxs/target/targetcareers/jobs",
-  salesforce: "https://salesforce.wd1.myworkdayjobs.com/wday/cxs/salesforce/External_Career_Site/jobs",
-  adobe: "https://adobe.wd5.myworkdayjobs.com/wday/cxs/adobe/external_experienced/jobs",
-  konami: "https://www.paycomonline.net/v4/ats/web.php/portal/01350CF494085F3FF60A45E3AB7A67DF/career-page",
-  openai: "https://api.ashbyhq.com/posting-api/job-board/openai",
-  stripe: "https://boards-api.greenhouse.io/v1/boards/stripe/jobs",
-  spotify: "https://api.lever.co/v0/postings/spotify?mode=json",
-  airbnb: "https://boards-api.greenhouse.io/v1/boards/airbnb/jobs",
-  discord: "https://boards-api.greenhouse.io/v1/boards/discord/jobs",
-  figma: "https://boards-api.greenhouse.io/v1/boards/figma/jobs",
-  datadog: "https://boards-api.greenhouse.io/v1/boards/datadog/jobs",
-  linear: "https://api.ashbyhq.com/posting-api/job-board/linear",
-  notion: "https://api.ashbyhq.com/posting-api/job-board/notion",
-  ramp: "https://api.ashbyhq.com/posting-api/job-board/ramp",
-  retool: "https://api.ashbyhq.com/posting-api/job-board/retool",
-  netflix: "https://jobs.netflix.com/search",
-  uber: "https://www.uber.com/us/en/careers/list/",
-  meta: "https://www.metacareers.com/jobs",
-  google: "https://www.google.com/about/careers/applications/jobs",
-  microsoft: "https://careers.microsoft.com/professionals/us/en/search-results",
-  apple: "https://jobs.apple.com/en-us/search",
-  amazon: "https://www.amazon.jobs/en/search",
-};
-
 /**
- * Extracts candidate jobs from an ATS endpoint or direct JSON API if recognized.
+ * Main scraper orchestrator for custom career portals and company career URLs.
  */
-async function scrapeKnownATS(url: string, companyName: string): Promise<RawExtractedJob[] | null> {
-  try {
-    const cleanCompany = companyName.toLowerCase().replace(/[^a-z0-9]/g, "");
-
-    // Check direct Workday ATS
-    if (
-      cleanCompany === "nvidia" ||
-      url.includes("myworkdayjobs.com") ||
-      url.includes("/wday/cxs/")
-    ) {
-      const workdayJobs = await scrapeWorkdayPortal(url, companyName);
-      if (workdayJobs && workdayJobs.length > 0) return workdayJobs;
-    }
-
-    const parsed = new URL(url);
-    const host = parsed.hostname.toLowerCase();
-    const pathname = parsed.pathname;
-
-    // 1. Greenhouse API (boards.greenhouse.io or boards-api.greenhouse.io)
-    if (host.includes("greenhouse.io")) {
-      const parts = pathname.split("/").filter(Boolean);
-      let slug = "";
-      if (parts[0] === "embed" || parts[0] === "v1" || parts[0] === "boards") {
-        slug = parts[1] || parts[0];
-      } else {
-        slug = parts[0] || cleanCompany;
-      }
-
-      if (slug) {
-        try {
-          const res = await fetch(`https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`, {
-            headers: { "User-Agent": "JobBuddy-AI/1.0", Accept: "application/json" },
-          });
-          if (res.ok) {
-            const data = await res.json();
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const list = data.jobs || [];
-            if (list.length > 0) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              return list.map((j: any) => ({
-                title: j.title,
-                location: j.location?.name || "Various",
-                locationType: /remote/i.test(j.location?.name || "") ? "remote" : "onsite",
-                jobType: "full_time",
-                applyUrl: j.absolute_url || url,
-                skills: [],
-              }));
-            }
-          }
-        } catch {}
-      }
-    }
-
-    // 2. Ashby API (jobs.ashbyhq.com or api.ashbyhq.com)
-    if (host.includes("ashbyhq.com")) {
-      const parts = pathname.split("/").filter(Boolean);
-      const slug = parts[0] === "posting-api" || parts[0] === "job-board" ? parts[1] : parts[0];
-      if (slug) {
-        try {
-          const res = await fetch(`https://api.ashbyhq.com/posting-api/job-board/${slug}`, {
-            headers: { "User-Agent": "JobBuddy-AI/1.0", Accept: "application/json" },
-          });
-          if (res.ok) {
-            const data = await res.json();
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const list = data.jobs || [];
-            if (list.length > 0) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              return list.map((j: any) => ({
-                title: j.title,
-                location: j.location || "Various",
-                locationType: j.isRemote ? "remote" : "onsite",
-                jobType: "full_time",
-                applyUrl: j.jobUrl || j.applyUrl || url,
-                skills: [],
-              }));
-            }
-          }
-        } catch {}
-      }
-    }
-
-    // 3. Lever API (jobs.lever.co or api.lever.co)
-    if (host.includes("lever.co")) {
-      const parts = pathname.split("/").filter(Boolean);
-      const slug = parts[0] === "v0" || parts[0] === "postings" ? parts[1] : parts[0];
-      if (slug) {
-        try {
-          const res = await fetch(`https://api.lever.co/v0/postings/${slug}?mode=json`, {
-            headers: { "User-Agent": "JobBuddy-AI/1.0", Accept: "application/json" },
-          });
-          if (res.ok) {
-            const list = await res.json();
-            if (Array.isArray(list) && list.length > 0) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              return list.map((j: any) => ({
-                title: j.text,
-                location: j.categories?.location || "Various",
-                locationType: /remote/i.test(j.categories?.location || "") ? "remote" : "onsite",
-                jobType: "full_time",
-                applyUrl: j.hostedUrl || j.applyUrl || url,
-                skills: [],
-              }));
-            }
-          }
-        } catch {}
-      }
-    }
-
-    // 4. SmartRecruiters API
-    if (host.includes("smartrecruiters.com")) {
-      const parts = pathname.split("/").filter(Boolean);
-      const slug = parts[0];
-      if (slug) {
-        try {
-          const res = await fetch(`https://api.smartrecruiters.com/v1/companies/${slug}/postings`, {
-            headers: { "User-Agent": "JobBuddy-AI/1.0", Accept: "application/json" },
-          });
-          if (res.ok) {
-            const data = await res.json();
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const list = data.content || [];
-            if (list.length > 0) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              return list.map((j: any) => ({
-                title: j.name,
-                location: j.location?.city ? `${j.location.city}, ${j.location.country}` : "Various",
-                locationType: j.location?.remote ? "remote" : "onsite",
-                jobType: "full_time",
-                applyUrl: `https://jobs.smartrecruiters.com/${slug}/${j.id}`,
-                skills: [],
-              }));
-            }
-          }
-        } catch {}
-      }
-    }
-
-    // 5. Workable API
-    if (host.includes("workable.com")) {
-      const parts = pathname.split("/").filter(Boolean);
-      const slug = parts[parts.length - 1] || cleanCompany;
-      if (slug) {
-        try {
-          const res = await fetch(`https://apply.workable.com/api/v1/widget/accounts/${slug}`, {
-            headers: { "User-Agent": "JobBuddy-AI/1.0", Accept: "application/json" },
-          });
-          if (res.ok) {
-            const data = await res.json();
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const list = data.jobs || [];
-            if (Array.isArray(list) && list.length > 0) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              return list.map((j: any) => ({
-                title: j.title,
-                location: j.city ? `${j.city}, ${j.country}` : "Various",
-                locationType: j.telecommuting ? "remote" : "onsite",
-                jobType: "full_time",
-                applyUrl: j.url || j.shortlink || url,
-                skills: [],
-              }));
-            }
-          }
-        } catch {}
-      }
-    }
-
-    // 6. Recruitee API
-    if (host.includes("recruitee.com")) {
-      const slug = host.split(".")[0] || cleanCompany;
-      try {
-        const res = await fetch(`https://${slug}.recruitee.com/api/offers/`, {
-          headers: { "User-Agent": "JobBuddy-AI/1.0", Accept: "application/json" },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const list = data.offers || [];
-          if (Array.isArray(list) && list.length > 0) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            return list.map((j: any) => ({
-              title: j.title,
-              location: j.city || "Various",
-              locationType: j.remote ? "remote" : "onsite",
-              jobType: "full_time",
-              applyUrl: j.careers_url || url,
-              skills: [],
-            }));
-          }
-        }
-      } catch {}
-    }
-
-    return null;
-  } catch (err) {
-    console.error("Error in scrapeKnownATS:", err);
-    return null;
-  }
-}
-
-/**
- * Direct Workday JSON API ingestion (Nvidia, Target, Adobe, Salesforce, etc.)
- */
-async function scrapeWorkdayPortal(url: string, companyName: string): Promise<RawExtractedJob[] | null> {
-  try {
-    let endpoint = "";
-    let baseHost = "";
-
-    if (url.includes("/wday/cxs/")) {
-      endpoint = url;
-      const parsed = new URL(url);
-      baseHost = parsed.origin;
-    } else if (url.includes("myworkdayjobs.com")) {
-      const parsed = new URL(url);
-      baseHost = parsed.origin;
-      const pathParts = parsed.pathname.split("/").filter(Boolean);
-      const site = pathParts.find((p) => !["en-US", "en", "wday", "cxs"].includes(p)) || "NVIDIAExternalCareerSite";
-      const companySlug = parsed.hostname.split(".")[0] || companyName.toLowerCase().replace(/[^a-z0-9]/g, "");
-      endpoint = `${baseHost}/wday/cxs/${companySlug}/${site}/jobs`;
-    } else if (companyName.toLowerCase().includes("nvidia")) {
-      baseHost = "https://nvidia.wd5.myworkdayjobs.com";
-      endpoint = "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs";
-    }
-
-    if (!endpoint) return null;
-
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      },
-      body: JSON.stringify({
-        appliedFacets: {},
-        limit: 30,
-        offset: 0,
-        searchText: "",
-      }),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const postings = data.jobPostings || [];
-      if (Array.isArray(postings) && postings.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return postings.map((p: any) => ({
-          title: p.title,
-          location: p.locationsText || "Various Locations",
-          locationType: /remote/i.test(p.locationsText || "") ? "remote" : "onsite",
-          jobType: "full_time",
-          experienceLevel: /senior|lead|principal|architect|director/i.test(p.title) ? "senior" : "mid",
-          skills: [],
-          applyUrl: p.externalPath ? `${baseHost}${p.externalPath}` : url,
-        }));
-      }
-    }
-  } catch (err) {
-    console.warn("Workday API scraping attempt:", err);
-  }
-  return null;
-}
-
-/**
- * Headless Playwright Browser Engine with Network Response Interception & Smart DOM Extraction
- */
-async function scrapeWithHeadlessPlaywright(
-  url: string,
-  companyName: string
-): Promise<RawExtractedJob[]> {
-  let browser = null;
-  const interceptedJobs: RawExtractedJob[] = [];
-
-  try {
-    browser = await chromium.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-    });
-
-    const context = await browser.newContext({
-      userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-      viewport: { width: 1280, height: 800 },
-    });
-
-    const page = await context.newPage();
-
-    // 1. Listen for background API network responses containing job JSON
-    page.on("response", async (response) => {
-      try {
-        const contentType = response.headers()["content-type"] || "";
-        const responseUrl = response.url().toLowerCase();
-
-        if (
-          contentType.includes("application/json") &&
-          (responseUrl.includes("job") ||
-            responseUrl.includes("post") ||
-            responseUrl.includes("career") ||
-            responseUrl.includes("cxs") ||
-            responseUrl.includes("search") ||
-            responseUrl.includes("requisition"))
-        ) {
-          const json = await response.json();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const items = Array.isArray(json)
-            ? json
-            : json.jobs || json.postings || json.data || json.jobPostings || json.results || json.content || [];
-
-          if (Array.isArray(items) && items.length > 0) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            items.forEach((item: any) => {
-              const title = item.title || item.name || item.text || item.jobTitle;
-              const location = item.location?.name || item.location || item.locationsText || item.city || "Various";
-              const applyUrl = item.absolute_url || item.hostedUrl || item.jobUrl || item.applyUrl || item.url || url;
-
-              if (title && typeof title === "string" && title.length > 3 && title.length < 100) {
-                if (!interceptedJobs.some((j) => j.title === title)) {
-                  interceptedJobs.push({
-                    title: title.trim(),
-                    location: typeof location === "string" ? location.trim() : "Various",
-                    locationType: /remote/i.test(JSON.stringify(item)) ? "remote" : "onsite",
-                    jobType: "full_time",
-                    applyUrl: String(applyUrl).startsWith("http") ? String(applyUrl) : url,
-                    skills: [],
-                  });
-                }
-              }
-            });
-          }
-        }
-      } catch {}
-    });
-
-    // 2. Navigate to Career Portal
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 18000 });
-
-    // Wait for JS hydration
-    await page.waitForTimeout(2500);
-
-    // Scroll down to trigger lazy loading
-    await page.evaluate(() => window.scrollBy(0, 1000));
-    await page.waitForTimeout(1000);
-
-    // If network interception captured jobs, return them
-    if (interceptedJobs.length > 0) {
-      await browser.close();
-      return interceptedJobs;
-    }
-
-    // 3. Extract rendered DOM items & links
-    const domJobs = await page.evaluate(
-      ({ baseUrl }) => {
-        const jobs: Array<{ title: string; location: string; applyUrl: string }> = [];
-
-        // Select all candidate job cards, links, rows, list items
-        const selectors = [
-          ".job-card",
-          ".job-listing",
-          ".job-item",
-          ".job-row",
-          "[data-job-id]",
-          "[data-posting-id]",
-          "tr",
-          "li",
-          "article",
-          "a[href*='job']",
-          "a[href*='posting']",
-          "a[href*='position']",
-          "a[href*='career']",
-        ];
-
-        const elements = document.querySelectorAll(selectors.join(", "));
-
-        elements.forEach((el) => {
-          const anchor = el.tagName === "A" ? (el as HTMLAnchorElement) : el.querySelector("a");
-          const titleEl =
-            el.querySelector("h1, h2, h3, h4, h5, .job-title, .title, strong, [class*='title']") || anchor;
-          const locationEl = el.querySelector(".location, [class*='location'], .city, .address, [class*='city']");
-
-          const title = titleEl?.textContent?.replace(/\s+/g, " ").trim() || "";
-          const location = locationEl?.textContent?.replace(/\s+/g, " ").trim() || "Various Locations";
-          const href = anchor?.getAttribute("href");
-
-          if (
-            title.length >= 5 &&
-            title.length <= 100 &&
-            /engineer|developer|manager|analyst|associate|lead|specialist|designer|consultant|architect|scientist|director|coordinator|technician|representative|administrator|intern|sales|marketing|recruiter|product|operations|qa|devops|data|ai|ml/i.test(
-              title
-            )
-          ) {
-            let applyUrl = baseUrl;
-            if (href) {
-              try {
-                applyUrl = new URL(href, baseUrl).toString();
-              } catch {
-                applyUrl = baseUrl;
-              }
-            }
-
-            if (!jobs.some((j) => j.title === title)) {
-              jobs.push({ title, location, applyUrl });
-            }
-          }
-        });
-
-        return jobs;
-      },
-      { baseUrl: url }
-    );
-
-    await browser.close();
-
-    if (domJobs.length > 0) {
-      return domJobs.map((j) => ({
-        title: j.title,
-        location: j.location,
-        locationType: /remote/i.test(j.location) ? "remote" : "onsite",
-        jobType: "full_time",
-        experienceLevel: /senior|lead|principal|director|iii|iv/i.test(j.title) ? "senior" : "mid",
-        skills: [],
-        applyUrl: j.applyUrl,
-      }));
-    }
-  } catch (err) {
-    console.warn("Playwright headless scraper error:", err);
-  } finally {
-    if (browser) {
-      try {
-        await browser.close();
-      } catch {}
-    }
-  }
-
-  return [];
-}
-
-/**
- * Universal HTML & Gemini AI Job Extractor for custom enterprise portals
- */
-async function scrapeUniversalHTML(
+export async function scrapeCustomCareersPage(
   url: string,
   companyName: string,
   targetRoles: string[] = []
-): Promise<RawExtractedJob[]> {
-  try {
-    // 1. Playwright Headless Browser (SPA / JS hydration)
-    const browserJobs = await scrapeWithHeadlessPlaywright(url, companyName);
-    if (browserJobs && browserJobs.length > 0) {
-      return browserJobs;
-    }
-
-    // 2. HTTP Fetch fallback
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
-
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      },
-    });
-    clearTimeout(timeout);
-
-    if (!res.ok) {
-      throw new Error(`Failed to fetch webpage (Status: ${res.status})`);
-    }
-
-    const html = await res.text();
-
-    // Check if the page redirects to or embeds an external ATS
-    const atsLinkMatch = html.match(
-      /href=["'](https?:\/\/[^"']*(?:paycomonline|myworkdayjobs|greenhouse|ashbyhq|lever|icims|taleo|smartrecruiters|workable|recruitee)[^"']*)["']/i
-    );
-    if (atsLinkMatch && atsLinkMatch[1]) {
-      const redirectedAtsUrl = atsLinkMatch[1];
-      const atsResult = await scrapeKnownATS(redirectedAtsUrl, companyName);
-      if (atsResult && atsResult.length > 0) {
-        return atsResult;
-      }
-    }
-
-    return await extractJobsFromHtmlOrAI(html, url, companyName, targetRoles);
-  } catch (error) {
-    console.error("Error in scrapeUniversalHTML:", error);
-    return [];
-  }
-}
-
-/**
- * Parses raw HTML with Google Gemini AI to extract structured job postings.
- */
-async function extractJobsFromHtmlOrAI(
-  html: string,
-  url: string,
-  companyName: string,
-  targetRoles: string[] = []
-): Promise<RawExtractedJob[]> {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-  if (apiKey) {
-    try {
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-      const cleanText = html
-        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
-        .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
-        .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, "")
-        .slice(0, 30000);
-
-      const prompt = `
-You are an expert career web scraper. Analyze the following HTML/text from the careers page of "${companyName}" (${url}).
-Extract all individual current job openings listed on the page.
-
-Return ONLY a valid JSON array of objects with the following structure:
-[
-  {
-    "title": "Exact Job Title (e.g. Technical Solutions Engineer III)",
-    "location": "Location or Remote (e.g. Las Vegas, NV or Remote)",
-    "locationType": "remote" | "onsite" | "hybrid",
-    "jobType": "full_time" | "part_time" | "contract" | "internship",
-    "experienceLevel": "entry" | "mid" | "senior" | "lead",
-    "skills": ["Skill1", "Skill2"],
-    "applyUrl": "Direct application or job detail URL (or absolute URL based on ${url})"
-  }
-]
-
-Page Content:
-${cleanText}
-`;
-
-      const result = await model.generateContent(prompt);
-      const responseText = result.response.text();
-      const jsonMatch = responseText.match(/\[[\s\S]*\]/);
-
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return parsed.map((item: any) => ({
-            title: String(item.title || "Open Role"),
-            location: String(item.location || "Various"),
-            locationType: item.locationType || "remote",
-            jobType: item.jobType || "full_time",
-            experienceLevel: item.experienceLevel || "mid",
-            skills: Array.isArray(item.skills) ? item.skills : [],
-            applyUrl: item.applyUrl?.startsWith("http")
-              ? item.applyUrl
-              : new URL(item.applyUrl || "", url).toString(),
-          }));
-        }
-      }
-    } catch (geminiErr) {
-      console.warn("Gemini extraction fallback:", geminiErr);
-    }
-  }
-
-  // Fallback heuristic regex
-  const anchorRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gi;
-  const extracted: RawExtractedJob[] = [];
-  let match;
-
-  while ((match = anchorRegex.exec(html)) !== null && extracted.length < 20) {
-    const href = match[1];
-    const text = match[2].replace(/<[^>]+>/g, "").trim();
-
-    if (
-      text.length > 5 &&
-      text.length < 90 &&
-      /engineer|developer|manager|analyst|associate|lead|specialist|designer|consultant|architect|scientist|director|coordinator|technician|sales|product/i.test(
-        text
-      )
-    ) {
-      let fullApplyUrl = href;
-      try {
-        fullApplyUrl = new URL(href, url).toString();
-      } catch {
-        fullApplyUrl = url;
-      }
-
-      extracted.push({
-        title: text,
-        location: "Various Locations",
-        locationType: "onsite",
-        jobType: "full_time",
-        experienceLevel: /senior|lead|principal|director|iii|iv/i.test(text) ? "senior" : "mid",
-        skills: targetRoles,
-        applyUrl: fullApplyUrl,
-      });
-    }
-  }
-
-  return extracted;
-}
-
-/**
- * Ingests and syncs all jobs from a custom company connector.
- */
-export async function ingestCustomCompanyJobs(
-  connectorId: string,
-  userId: string
 ): Promise<CustomScrapeResult> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows: any[] = await prisma.$queryRawUnsafe(
-    `SELECT id, company_name as "companyName", careers_url as "careersUrl", target_roles as "targetRoles"
-     FROM custom_company_connectors
-     WHERE id = $1`,
-    connectorId
-  );
-
-  const connector = rows[0];
-  if (!connector) {
-    return { success: false, jobCount: 0, error: "Connector not found", jobs: [] };
-  }
-
-  // Update status to syncing
-  await prisma.$executeRawUnsafe(
-    `UPDATE custom_company_connectors SET status = 'syncing' WHERE id = $1`,
-    connectorId
-  );
+  console.log(`[Custom Career Scraper] Starting sync for ${companyName} (${url})...`);
 
   try {
-    let careersUrl = connector.careersUrl;
-    const cleanCompany = connector.companyName.toLowerCase().replace(/[^a-z0-9]/g, "");
+    let scrapedJobs: ScrapedJobPayload[] | null = null;
 
-    // Check if we have a direct known ATS mapping for this company
-    if (KNOWN_COMPANY_ATS_DIRECT_MAP[cleanCompany]) {
-      careersUrl = KNOWN_COMPANY_ATS_DIRECT_MAP[cleanCompany];
+    // Strategy 1: Direct ATS API (Workday, Greenhouse, Lever, Ashby, SmartRecruiters)
+    scrapedJobs = await scrapeKnownDirectATS(url, companyName);
+
+    // Strategy 2: Playwright background network API interception + DOM fallback
+    if (!scrapedJobs || scrapedJobs.length === 0) {
+      console.log(`[Custom Career Scraper] Falling back to Playwright interceptor for ${companyName}...`);
+      scrapedJobs = await scrapeWithPlaywrightInterceptor(url, companyName);
     }
 
-    // 1. Try Known ATS (Workday, Greenhouse, Ashby, Lever, SmartRecruiters, Workable, Recruitee)
-    let rawJobs = await scrapeKnownATS(careersUrl, connector.companyName);
+    if (!scrapedJobs || scrapedJobs.length === 0) {
+      return {
+        success: false,
+        jobCount: 0,
+        error: `Could not detect open job postings on ${companyName}'s career portal.`,
+        jobs: [],
+      };
+    }
 
-    // 2. If not ATS, use Playwright Headless Browser + Gemini AI
-    if (!rawJobs || rawJobs.length === 0) {
-      const targetRoles = Array.isArray(connector.targetRoles) ? connector.targetRoles : [];
-      rawJobs = await scrapeUniversalHTML(
-        careersUrl,
-        connector.companyName,
-        targetRoles
+    // Filter by target roles if specified
+    let filteredJobs = scrapedJobs;
+    if (targetRoles.length > 0) {
+      const lowerRoles = targetRoles.map((r) => r.toLowerCase().trim());
+      filteredJobs = scrapedJobs.filter((job) =>
+        lowerRoles.some((role) => job.title.toLowerCase().includes(role))
       );
+      if (filteredJobs.length === 0) {
+        filteredJobs = scrapedJobs; // Fallback to all if strict filter yielded 0
+      }
     }
 
-    // If still 0 jobs found, provide target role specific entry
-    if (!rawJobs || rawJobs.length === 0) {
-      const targetRoles = Array.isArray(connector.targetRoles) ? connector.targetRoles : [];
-      rawJobs = [
-        {
-          title:
-            targetRoles.length > 0
-              ? `${targetRoles[0]} at ${connector.companyName}`
-              : `${connector.companyName} Open Position`,
-          location: "Various Locations",
-          locationType: "remote",
-          jobType: "full_time",
-          experienceLevel: "mid",
-          skills: targetRoles,
-          applyUrl: connector.careersUrl,
-        },
-      ];
-    }
+    // Persist jobs in database
+    const logoUrls = getCompanyLogoUrls(companyName);
+    const companyLogo = Array.isArray(logoUrls) ? logoUrls[0] || null : null;
 
-    const companyLogo = getCompanyLogoUrls(connector.companyName, null, connector.careersUrl)[0] || null;
-
-    // 3. Upsert discovered jobs into the Job pool
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const upsertedJobs: any[] = [];
-    for (const raw of rawJobs) {
-      // Safe alphanumeric hex ID
-      const safeHash = Buffer.from(raw.applyUrl || raw.title)
-        .toString("hex")
-        .slice(0, 16);
-      const jobId = `custom_${cleanCompany}_${safeHash}`;
-
-      const targetRoles = Array.isArray(connector.targetRoles) ? connector.targetRoles : [];
-      const skills = raw.skills && raw.skills.length > 0 ? raw.skills : targetRoles;
-
-      const dbJob = await prisma.job.upsert({
-        where: { id: jobId },
-        update: {
-          title: raw.title,
-          company: connector.companyName,
-          companyLogo: companyLogo || undefined,
-          location: raw.location || "Various",
-          locationType: raw.locationType || "remote",
-          jobType: raw.jobType || "full_time",
-          experienceLevel: raw.experienceLevel || "mid",
-          skills,
-          jobUrl: raw.applyUrl,
-          applyUrl: raw.applyUrl,
-          isActive: true,
-          lastSeenAt: new Date(),
-        },
-        create: {
-          id: jobId,
-          externalId: jobId,
-          title: raw.title,
-          company: connector.companyName,
-          companyLogo,
-          location: raw.location || "Various",
-          locationType: raw.locationType || "remote",
-          jobType: raw.jobType || "full_time",
-          experienceLevel: raw.experienceLevel || "mid",
-          skills,
-          jobUrl: raw.applyUrl,
-          applyUrl: raw.applyUrl,
-          isActive: true,
-          postedAt: new Date(),
-        },
-      });
-
-      upsertedJobs.push(dbJob);
-    }
-
-    // Update connector with success & job count
-    await prisma.$executeRawUnsafe(
-      `UPDATE custom_company_connectors
-       SET status = 'active', job_count = $1, last_synced_at = NOW(), last_error = NULL, logo_url = $2
-       WHERE id = $3`,
-      upsertedJobs.length,
-      companyLogo,
-      connectorId
+    const savedJobs = await Promise.all(
+      filteredJobs.map(async (j) => {
+        try {
+          return await prisma.job.create({
+            data: {
+              title: j.title,
+              company: companyName,
+              companyLogo,
+              location: j.location || "Various",
+              locationType: j.locationType || "onsite",
+              jobType: j.jobType || "full_time",
+              experienceLevel: j.experienceLevel || "mid",
+              description: j.description || `${j.title} at ${companyName}.`,
+              skills: j.skills || ["Software Development", "Problem Solving"],
+              jobUrl: j.applyUrl || url,
+              applyUrl: j.applyUrl || url,
+              isActive: true,
+              postedAt: j.postedAt ? new Date(j.postedAt) : new Date(),
+            },
+          });
+        } catch {
+          return null;
+        }
+      })
     );
+
+    const validSaved = savedJobs.filter((j): j is NonNullable<typeof j> => j !== null);
 
     return {
       success: true,
-      jobCount: upsertedJobs.length,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      jobs: upsertedJobs.map((j: any) => ({
+      jobCount: validSaved.length,
+      jobs: validSaved.map((j) => ({
         title: j.title,
         company: j.company,
         location: j.location || "Various",
         applyUrl: j.applyUrl || j.jobUrl,
       })),
     };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (error: any) {
-    console.error("Error syncing custom company jobs:", error);
-    await prisma.$executeRawUnsafe(
-      `UPDATE custom_company_connectors SET status = 'error', last_error = $1 WHERE id = $2`,
-      error.message || "Failed to parse career portal",
-      connectorId
-    );
-
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : "Unknown scraping error";
+    console.error(`[Custom Career Scraper Error] ${companyName}:`, error);
     return {
       success: false,
       jobCount: 0,
-      error: error.message || "Failed to parse career portal",
+      error: errorMsg,
+      jobs: [],
+    };
+  }
+}
+
+/**
+ * Ingests jobs for a given custom company connector record.
+ */
+export async function ingestCustomCompanyJobs(
+  connectorId: string,
+  userId: string
+): Promise<CustomScrapeResult> {
+  try {
+    const rows: Array<{
+      careersUrl: string;
+      companyName: string;
+      targetRoles: string[];
+    }> = await prisma.$queryRawUnsafe(
+      `SELECT careers_url as "careersUrl", company_name as "companyName", target_roles as "targetRoles"
+       FROM custom_company_connectors
+       WHERE id = $1 AND user_id = $2`,
+      connectorId,
+      userId
+    );
+
+    if (!rows || rows.length === 0) {
+      return {
+        success: false,
+        jobCount: 0,
+        error: "Connector not found",
+        jobs: [],
+      };
+    }
+
+    const { careersUrl, companyName, targetRoles } = rows[0];
+    const result = await scrapeCustomCareersPage(
+      careersUrl,
+      companyName,
+      Array.isArray(targetRoles) ? targetRoles : []
+    );
+
+    await prisma.$executeRawUnsafe(
+      `UPDATE custom_company_connectors
+       SET status = $1, job_count = $2, last_synced_at = NOW(), last_error = $3, updated_at = NOW()
+       WHERE id = $4 AND user_id = $5`,
+      result.success ? "active" : "error",
+      result.jobCount,
+      result.error || null,
+      connectorId,
+      userId
+    );
+
+    return result;
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : "Sync failed";
+    await prisma.$executeRawUnsafe(
+      `UPDATE custom_company_connectors
+       SET status = 'error', last_error = $1, updated_at = NOW()
+       WHERE id = $2 AND user_id = $3`,
+      errorMsg,
+      connectorId,
+      userId
+    );
+    return {
+      success: false,
+      jobCount: 0,
+      error: errorMsg,
       jobs: [],
     };
   }

@@ -46,7 +46,6 @@ export function CompanyLogo({
     : "JB";
 
   const handleError = () => {
-    // If current CDN candidate fails, try next CDN URL candidate
     if (candidateIndex < logoCandidates.length - 1) {
       setCandidateIndex((prev) => prev + 1);
     } else {
@@ -63,6 +62,7 @@ export function CompanyLogo({
       )}
     >
       {!hasError && currentUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={currentUrl}
           alt={`${company} logo`}

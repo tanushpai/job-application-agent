@@ -131,8 +131,8 @@ export class SmartRecruitersConnector implements JobConnector {
     try {
       const res = await fetch('https://api.smartrecruiters.com/v1/companies/square/postings?limit=1');
       return { success: res.ok };
-    } catch (e: any) {
-      return { success: false, message: e?.message || 'Connection failed' };
+    } catch (e: unknown) {
+      return { success: false, message: (e as Error)?.message || 'Connection failed' };
     }
   }
 }

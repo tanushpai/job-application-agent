@@ -3,7 +3,7 @@ import { getUserProfile } from "@/lib/actions/profile-actions";
 import { calculateProfileCompleteness } from "@/lib/profile-utils";
 import { ProfileTabsForm } from "@/components/dashboard/profile-tabs-form";
 import { ProfileCompletenessCard } from "@/components/dashboard/profile-completeness-card";
-import { Sparkles, UserCheck } from "lucide-react";
+import { UserCheck } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 

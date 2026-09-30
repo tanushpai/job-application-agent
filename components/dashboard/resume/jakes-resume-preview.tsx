@@ -2,23 +2,28 @@
 
 import React from "react";
 import { TailoredResumePayload } from "@/lib/ai/gemini-tailor";
-import { Download, Printer, Copy, Check, Sparkles, ExternalLink } from "lucide-react";
+import { Download, Printer, Copy, Check, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface JakesResumePreviewProps {
-  resume: TailoredResumePayload;
+  resume?: TailoredResumePayload;
+  payload?: TailoredResumePayload;
   onSaveToLibrary?: () => void;
   isSaving?: boolean;
   savedFileUrl?: string | null;
 }
 
 export function JakesResumePreview({
-  resume,
+  resume: rawResume,
+  payload,
   onSaveToLibrary,
   isSaving,
   savedFileUrl,
 }: JakesResumePreviewProps) {
+  const resume = payload || rawResume;
   const [copied, setCopied] = React.useState(false);
+
+  if (!resume) return null;
 
   const p = resume.personalInfo || {
     fullName: "Candidate Full Name",

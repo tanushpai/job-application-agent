@@ -1,5 +1,6 @@
 import { startBoss, APPLICATION_QUEUE_NAME, ApplicationJobPayload } from "./boss";
 import { prisma } from "@/lib/prisma";
+import { Prisma, ApplicationStatus } from "@prisma/client";
 import { LocalPlaywrightProvider } from "@/lib/automation/local-playwright-provider";
 import { detectPlatformFromUrl } from "@/lib/automation/platform-detector";
 import { GreenhouseApplicationHandler } from "@/lib/automation/handlers/greenhouse-handler";
@@ -78,7 +79,7 @@ export async function processApplicationJob(payload: ApplicationJobPayload): Pro
           eventType,
           stage,
           message,
-          metadata: metadata ? (metadata as any) : undefined,
+          metadata: metadata ? (metadata as Prisma.InputJsonValue) : Prisma.JsonNull,
         },
       });
     } catch (err) {
@@ -86,14 +87,14 @@ export async function processApplicationJob(payload: ApplicationJobPayload): Pro
     }
   };
 
-  const updateStatus = async (status: any, failureReason?: string, missingFields?: any) => {
+  const updateStatus = async (status: ApplicationStatus, failureReason?: string, missingFields?: Prisma.InputJsonValue) => {
     try {
       await prisma.application.update({
         where: { id: applicationId },
         data: {
           status,
           failureReason: failureReason || null,
-          missingFields: missingFields ? (missingFields as any) : undefined,
+          missingFields: missingFields ?? Prisma.JsonNull,
         },
       });
     } catch (err) {
@@ -175,7 +176,8 @@ export async function processApplicationJob(payload: ApplicationJobPayload): Pro
         completedAt: new Date(),
       },
     });
-  } catch (err: any) {
+  } catch (_err: unknown) {
+    const err = _err as Error;
     console.error(`[Worker] Error processing application ${applicationId}:`, err);
     await updateStatus("FAILED", err?.message || "Unexpected browser worker error");
     await logEvent("APPLICATION_FAILED", "Error", err?.message || "Worker execution failed");
